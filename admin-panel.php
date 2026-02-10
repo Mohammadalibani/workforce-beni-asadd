@@ -1657,22 +1657,77 @@ function deletePersonnel(personnelId) {
         });
     }
 }
-// ... توابع قبلی ...
 
-// تابع ذخیره تغییرات پرسنل در مودال ویرایش
-function savePersonnelChanges() {
-    var form = document.getElementById('personnelForm');
-    var formData = new FormData(form);
+function editPersonnelAdmin(personnelId) {
+    console.log('ویرایش پرسنل ID:', personnelId);
     
-    // اضافه کردن action و nonce
-    formData.append('action', 'workforce_update_personnel');
-    formData.append('nonce', '<?php echo wp_create_nonce("workforce_update"); ?>');
+    // گرفتن nonce
+    jQuery.ajax({
+        url: ajaxurl,
+        type: 'POST',
+        data: {
+            action: 'workforce_admin_get_personnel_nonce'
+        },
+        success: function(response) {
+            if (response.success) {
+                loadPersonnelFormAdmin(personnelId, response.data.nonce);
+            }
+        }
+    });
+}
+
+function loadPersonnelFormAdmin(personnelId, nonce) {
+    console.log('بارگذاری فرم برای پرسنل ID:', personnelId);
+    
+    jQuery.ajax({
+        url: ajaxurl,
+        type: 'POST',
+        data: {
+            action: 'workforce_admin_get_personnel',
+            personnel_id: personnelId,
+            nonce: nonce
+        },
+        success: function(response) {
+            console.log('پاسخ سرور:', response);
+            if (response.success) {
+                // نمایش مودال
+                document.getElementById('personnelModalTitle').textContent = 'ویرایش پرسنل';
+                document.getElementById('personnelModalBody').innerHTML = response.data.html;
+                document.getElementById('personnelModal').style.display = 'block';
+            } else {
+                alert('خطا: ' + response.data.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('خطای AJAX:', error);
+            alert('خطا در بارگذاری فرم');
+        }
+    });
+}
+
+function saveAdminPersonnelForm() {
+    console.log('ذخیره فرم ادمین...');
+    
+    const form = document.getElementById('personnelEditForm');
+    if (!form) {
+        alert('فرم یافت نشد!');
+        return;
+    }
+    
+    // اعتبارسنجی فرم
+    if (!form.checkValidity()) {
+        alert('لطفا فیلدهای ضروری را پر کنید.');
+        return;
+    }
     
     // نمایش لودینگ
-    var submitBtn = form.querySelector('button[type="button"]');
-    var originalText = submitBtn.innerHTML;
+    const submitBtn = form.querySelector('button[type="button"]');
+    const originalText = submitBtn.innerHTML;
     submitBtn.innerHTML = '<span class="spinner is-active"></span> در حال ذخیره...';
     submitBtn.disabled = true;
+    
+    // ارسال فرم
+    const formData = new FormData(form);
     
     jQuery.ajax({
         url: ajaxurl,
@@ -1682,19 +1737,91 @@ function savePersonnelChanges() {
         contentType: false,
         dataType: 'json',
         success: function(response) {
+            console.log('پاسخ ذخیره:', response);
             if (response.success) {
-                alert('تغییرات با موفقیت ذخیره شد.');
-                location.reload();
+                alert('✅ تغییرات با موفقیت ذخیره شد.');
+                location.reload(); // رفرش صفحه
             } else {
-                alert('خطا: ' + response.data.message);
+                alert('❌ خطا: ' + response.data.message);
                 submitBtn.innerHTML = originalText;
                 submitBtn.disabled = false;
             }
         },
         error: function(xhr, status, error) {
-            alert('خطا در ارتباط با سرور: ' + error);
+            console.error('خطای AJAX:', xhr.responseText);
+            alert('⚠️ خطا در ارتباط با سرور');
             submitBtn.innerHTML = originalText;
             submitBtn.disabled = false;
+        }
+    });
+}
+
+// در بخش JavaScript مربوط به ویرایش پرسنل، این تابع را اصلاح کنید:
+function savePersonnelChanges() {
+    console.log('savePersonnelChanges called');
+    
+    var form = document.getElementById('personnelForm');
+    if (!form) {
+        console.error('Form not found');
+        return;
+    }
+    
+    // جمع‌آوری داده‌ها
+    var formData = new FormData(form);
+    
+    // اضافه کردن action و nonce صحیح
+    formData.append('action', 'workforce_update_personnel');
+    
+    // گرفتن nonce از فرم
+    var formNonce = form.querySelector('[name="_wpnonce"]');
+    if (!formNonce) {
+        console.error('Nonce not found in form');
+        return;
+    }
+    
+    formData.append('_wpnonce', formNonce.value);
+    console.log('Using nonce from form:', formNonce.value);
+    
+    // نمایش لودینگ
+    var submitBtn = form.querySelector('button[type="button"]');
+    if (submitBtn) {
+        var originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<span class="spinner is-active"></span> در حال ذخیره...';
+        submitBtn.disabled = true;
+    }
+    
+    // ارسال درخواست AJAX
+    jQuery.ajax({
+        url: ajaxurl,
+        type: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        dataType: 'json',
+        success: function(response) {
+            console.log('AJAX Response:', response);
+            
+            if (submitBtn) {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+            }
+            
+            if (response.success) {
+                alert('✅ ' + response.data.message);
+                location.reload();
+            } else {
+                alert('❌ ' + response.data.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('AJAX Error:', error, xhr.responseText);
+            
+            if (submitBtn) {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+            }
+            
+            alert('⚠️ خطا در ارتباط با سرور: ' + error);
         }
     });
 }
@@ -1748,10 +1875,7 @@ function viewPersonnel(personnelId) {
     });
 }
 
-// تابع ویرایش پرسنل
-function editPersonnel(personnelId) {
-    loadPersonnelData(personnelId, 'edit');
-}
+
 
 // تابع مشاهده پرسنل
 function viewPersonnel(personnelId) {
@@ -1776,10 +1900,37 @@ function viewPersonnel(personnelId) {
     });
 }
 
-// تابع ویرایش پرسنل (باید از قبل موجود باشد)
-function editPersonnel(personnelId) {
+// این تابع را به صورت global تعریف کنید
+window.editPersonnel = function(personnelId) {
     loadPersonnelData(personnelId, 'edit');
-}
+};
+
+// همین‌طور برای سایر توابع:
+window.viewPersonnel = function(personnelId) {
+    loadPersonnelData(personnelId, 'view');
+};
+
+window.deletePersonnel = function(personnelId) {
+    if (confirm('⚠️ آیا از حذف این پرسنل اطمینان دارید؟\nاین عمل غیرقابل بازگشت است.')) {
+        jQuery.ajax({
+            url: ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'workforce_delete_personnel_admin',
+                personnel_id: personnelId,
+                nonce: '<?php echo wp_create_nonce("workforce_delete"); ?>'
+            },
+            success: function(response) {
+                if (response.success) {
+                    alert('پرسنل با موفقیت حذف شد.');
+                    location.reload();
+                } else {
+                    alert('خطا: ' + response.data.message);
+                }
+            }
+        });
+    }
+};
     
     function uploadExcelFile() {
         var formData = new FormData(document.getElementById('importForm'));
@@ -3338,6 +3489,31 @@ function workforce_ajax_delete_personnel() {
 // اضافه کردن AJAX handlers جدید در انتهای فایل (قبل از بسته شدن PHP)
 add_action('wp_ajax_workforce_view_personnel', 'workforce_ajax_view_personnel');
 add_action('wp_ajax_workforce_delete_personnel_admin', 'workforce_ajax_delete_personnel_admin');
+add_action('wp_ajax_wfba_update_personnel', 'wfba_ajax_update_personnel');
+
+function wfba_ajax_update_personnel() {
+
+    if (!current_user_can('read')) {
+        wp_send_json_error(['msg' => 'دسترسی غیرمجاز']);
+    }
+
+    if (empty($_POST['personnel_id']) || empty($_POST['data'])) {
+        wp_send_json_error(['msg' => 'داده ناقص']);
+    }
+
+    $personnel_id = intval($_POST['personnel_id']);
+    $data = array_map('sanitize_text_field', $_POST['data']);
+
+    require_once WFBA_PATH . 'database-handler.php';
+
+    $result = wfba_update_personnel($personnel_id, $data);
+
+    if ($result === false) {
+        wp_send_json_error(['msg' => 'خطا در ذخیره']);
+    }
+
+    wp_send_json_success(['msg' => 'ذخیره شد']);
+}
 
 function workforce_ajax_view_personnel() {
     check_ajax_referer('workforce_view', 'nonce');
@@ -3379,3 +3555,657 @@ function workforce_ajax_delete_personnel_admin() {
     }
 }
 add_action('wp_ajax_workforce_delete_personnel', 'workforce_ajax_delete_personnel');
+/**
+ * AJAX handlers برای ویرایش پرسنل در پنل ادمین
+ */
+
+// اضافه کردن این hooks در انتهای admin-panel.php
+add_action('wp_ajax_workforce_admin_get_personnel', 'workforce_ajax_admin_get_personnel');
+add_action('wp_ajax_workforce_admin_update_personnel', 'workforce_ajax_admin_update_personnel');
+
+/**
+ * دریافت فرم ویرایش پرسنل برای ادمین
+ */
+function workforce_ajax_admin_get_personnel() {
+    // بررسی دسترسی
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'شما دسترسی لازم را ندارید.']);
+        return; // اضافه کنید
+    }
+    
+    // بررسی nonce
+    if (!check_ajax_referer('workforce_admin_nonce', 'nonce', false)) {
+        wp_send_json_error(['message' => 'توکن امنیتی نامعتبر است.']);
+        return; // اضافه کنید
+    }
+    
+    $personnel_id = intval($_POST['personnel_id'] ?? 0);
+    if (!$personnel_id) {
+        wp_send_json_error(['message' => 'شناسه پرسنل نامعتبر است.']);
+    }
+    
+    // گرفتن اطلاعات پرسنل
+    $personnel = workforce_get_personnel($personnel_id);
+    if (!$personnel) {
+        wp_send_json_error(['message' => 'پرسنل یافت نشد.']);
+    }
+    
+    // گرفتن فیلدها
+    $fields = workforce_get_all_fields();
+    $meta = workforce_get_personnel_meta($personnel_id);
+    
+    // تولید HTML فرم
+    ob_start();
+    ?>
+    <form id="personnelEditForm">
+        <input type="hidden" name="personnel_id" value="<?php echo esc_attr($personnel->id); ?>">
+        <input type="hidden" name="action" value="workforce_admin_update_personnel">
+        <?php wp_nonce_field('workforce_admin_update', '_wpnonce'); ?>
+        
+        <div class="form-sections">
+            <div class="form-section">
+                <h4>اطلاعات پایه</h4>
+                <table class="form-table">
+                    <tr>
+                        <th scope="row"><label for="admin_national_code">کدملی</label></th>
+                        <td>
+                            <input type="text" id="admin_national_code" name="national_code" 
+                                   value="<?php echo esc_attr($personnel->national_code); ?>" 
+                                   class="regular-text">
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="admin_first_name">نام</label></th>
+                        <td>
+                            <input type="text" id="admin_first_name" name="first_name" 
+                                   value="<?php echo esc_attr($personnel->first_name); ?>" 
+                                   class="regular-text" required>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="admin_last_name">نام خانوادگی</label></th>
+                        <td>
+                            <input type="text" id="admin_last_name" name="last_name" 
+                                   value="<?php echo esc_attr($personnel->last_name); ?>" 
+                                   class="regular-text" required>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="admin_employment_date">تاریخ استخدام</label></th>
+                        <td>
+                            <input type="text" id="admin_employment_date" name="employment_date" 
+                                   class="regular-text jdatepicker" 
+                                   value="<?php echo esc_attr($personnel->employment_date); ?>" 
+                                   required>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="admin_employment_type">نوع استخدام</label></th>
+                        <td>
+                            <select id="admin_employment_type" name="employment_type" class="regular-text">
+                                <option value="permanent" <?php selected($personnel->employment_type, 'permanent'); ?>>دائمی</option>
+                                <option value="contract" <?php selected($personnel->employment_type, 'contract'); ?>>پیمانی</option>
+                                <option value="temporary" <?php selected($personnel->employment_type, 'temporary'); ?>>موقت</option>
+                                <option value="project" <?php selected($personnel->employment_type, 'project'); ?>>پروژه‌ای</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="admin_status">وضعیت</label></th>
+                        <td>
+                            <select id="admin_status" name="status" class="regular-text">
+                                <option value="active" <?php selected($personnel->status, 'active'); ?>>فعال</option>
+                                <option value="inactive" <?php selected($personnel->status, 'inactive'); ?>>غیرفعال</option>
+                                <option value="suspended" <?php selected($personnel->status, 'suspended'); ?>>تعلیق</option>
+                                <option value="retired" <?php selected($personnel->status, 'retired'); ?>>بازنشسته</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="admin_department_id">اداره</label></th>
+                        <td>
+                            <select id="admin_department_id" name="department_id" class="regular-text" required>
+                                <option value="">انتخاب کنید</option>
+                                <?php
+                                $departments = workforce_get_all_departments();
+                                foreach ($departments as $dept) {
+                                    $selected = $dept->id == $personnel->department_id ? ' selected' : '';
+                                    echo '<option value="' . esc_attr($dept->id) . '"' . $selected . '>' . 
+                                         esc_html($dept->name) . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            
+            <div class="form-section">
+                <h4>اطلاعات تکمیلی</h4>
+                <table class="form-table">
+                    <?php foreach ($fields as $field): ?>
+                        <?php if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])): ?>
+                            <?php
+                            $value = $meta[$field->id] ?? $meta[$field->field_name] ?? '';
+                            $required = $field->is_required ? ' required' : '';
+                            ?>
+                            <tr>
+                                <th scope="row">
+                                    <label for="admin_field_<?php echo esc_attr($field->id); ?>">
+                                        <?php echo esc_html($field->field_label); ?>
+                                        <?php if ($field->is_required): ?><span class="required">*</span><?php endif; ?>
+                                        <?php if ($field->is_locked): ?><span title="قفل شده">🔒</span><?php endif; ?>
+                                    </label>
+                                </th>
+                                <td>
+                                    <?php if ($field->field_type === 'select' && $field->options): ?>
+                                        <select id="admin_field_<?php echo esc_attr($field->id); ?>" 
+                                                name="field_<?php echo esc_attr($field->id); ?>"
+                                                class="regular-text<?php echo $required; ?>">
+                                            <option value="">انتخاب کنید</option>
+                                            <?php foreach ($field->options as $option): ?>
+                                                <option value="<?php echo esc_attr($option); ?>" 
+                                                    <?php selected($value, $option); ?>>
+                                                    <?php echo esc_html($option); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    <?php elseif ($field->field_type === 'date'): ?>
+                                        <input type="text" id="admin_field_<?php echo esc_attr($field->id); ?>" 
+                                               name="field_<?php echo esc_attr($field->id); ?>"
+                                               class="regular-text jdatepicker<?php echo $required; ?>"
+                                               value="<?php echo esc_attr($value); ?>">
+                                    <?php elseif ($field->field_type === 'checkbox'): ?>
+                                        <input type="checkbox" id="admin_field_<?php echo esc_attr($field->id); ?>" 
+                                               name="field_<?php echo esc_attr($field->id); ?>"
+                                               value="1" <?php checked($value, '1'); ?>>
+                                    <?php else: ?>
+                                        <input type="<?php echo $field->field_type === 'number' ? 'number' : 'text'; ?>" 
+                                               id="admin_field_<?php echo esc_attr($field->id); ?>" 
+                                               name="field_<?php echo esc_attr($field->id); ?>"
+                                               class="regular-text<?php echo $required; ?>"
+                                               value="<?php echo esc_attr($value); ?>"
+                                               <?php echo $field->field_type === 'number' ? 'step="0.01"' : ''; ?>>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                </table>
+            </div>
+        </div>
+        
+        <div class="form-actions">
+            <button type="button" class="button button-primary" onclick="saveAdminPersonnelForm()">ذخیره تغییرات</button>
+            <button type="button" class="button" onclick="hidePersonnelModal()">انصراف</button>
+        </div>
+    </form>
+    
+    <script>
+    jQuery(document).ready(function($) {
+        // فعال‌سازی datepicker برای فیلدهای تاریخ
+        $('.jdatepicker').persianDatepicker({
+            format: 'YYYY/MM/DD',
+            observer: true,
+            persianDigit: false,
+            autoClose: true
+        });
+    });
+    </script>
+    <?php
+    
+    $html = ob_get_clean();
+    
+    wp_send_json_success(['html' => $html]);
+    wp_die(); // این خط را حتماً اضافه کنید
+}
+
+/**
+ * ذخیره تغییرات پرسنل در پنل ادمین
+ */
+function workforce_ajax_admin_update_personnel() {
+    // بررسی دسترسی
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'شما دسترسی لازم را ندارید.']);
+    }
+    
+    // بررسی nonce
+    if (!check_ajax_referer('workforce_admin_update', '_wpnonce', false)) {
+        wp_send_json_error(['message' => 'توکن امنیتی نامعتبر است.']);
+    }
+    
+    $personnel_id = intval($_POST['personnel_id'] ?? 0);
+    if (!$personnel_id) {
+        wp_send_json_error(['message' => 'شناسه پرسنل نامعتبر است.']);
+    }
+    
+    // گرفتن اطلاعات فعلی
+    $personnel = workforce_get_personnel($personnel_id);
+    if (!$personnel) {
+        wp_send_json_error(['message' => 'پرسنل یافت نشد.']);
+    }
+    
+    // آماده‌سازی داده‌های جدید
+    $data = [];
+    $meta_updates = [];
+    
+    // فیلدهای اصلی
+    $main_fields = ['national_code', 'first_name', 'last_name', 'employment_date', 'employment_type', 'status', 'department_id'];
+    foreach ($main_fields as $field) {
+        if (isset($_POST[$field])) {
+            $data[$field] = sanitize_text_field($_POST[$field]);
+        }
+    }
+    
+    // اعتبارسنجی فیلدهای ضروری
+    if (empty($data['first_name']) || empty($data['last_name']) || empty($data['employment_date'])) {
+        wp_send_json_error(['message' => 'فیلدهای ضروری (نام، نام خانوادگی، تاریخ استخدام) را پر کنید.']);
+    }
+    
+    // اعتبارسنجی کدملی اگر وارد شده
+    if (!empty($data['national_code'])) {
+        if (!workforce_validate_national_code($data['national_code'])) {
+            wp_send_json_error(['message' => 'کدملی وارد شده معتبر نیست.']);
+        }
+        
+        // بررسی تکراری نبودن (به جز خود پرسنل)
+        global $wpdb;
+        $table_name = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        $existing = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $table_name WHERE national_code = %s AND id != %d AND is_deleted = 0",
+            $data['national_code'], $personnel_id
+        ));
+        
+        if ($existing > 0) {
+            wp_send_json_error(['message' => 'این کدملی قبلا در سیستم ثبت شده است.']);
+        }
+    }
+    
+    // اعتبارسنجی تاریخ
+    if (!workforce_validate_jalali_date($data['employment_date'])) {
+        wp_send_json_error(['message' => 'تاریخ استخدام معتبر نیست.']);
+    }
+    
+    // جمع‌آوری فیلدهای متا
+    $fields = workforce_get_all_fields();
+    foreach ($fields as $field) {
+        if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+            $field_name = 'field_' . $field->id;
+            if (isset($_POST[$field_name])) {
+                $value = $field->field_type === 'checkbox' ? 
+                         (isset($_POST[$field_name]) ? '1' : '0') : 
+                         sanitize_text_field($_POST[$field_name]);
+                
+                // اعتبارسنجی فیلدهای ضروری
+                if ($field->is_required && empty($value)) {
+                    wp_send_json_error(['message' => 'فیلد ضروری "' . $field->field_label . '" را پر کنید.']);
+                }
+                
+                $meta_updates[$field->id] = $value;
+            }
+        }
+    }
+    
+    // ذخیره تغییرات
+    try {
+        // به‌روزرسانی اطلاعات اصلی
+        $result = workforce_update_personnel($personnel_id, $data);
+        
+        if (!$result) {
+            wp_send_json_error(['message' => 'خطا در ذخیره اطلاعات اصلی.']);
+        }
+        
+        // به‌روزرسانی فیلدهای متا
+        foreach ($meta_updates as $field_id => $value) {
+            $field = workforce_get_field($field_id);
+            if ($field) {
+                workforce_update_personnel_meta($personnel_id, $field_id, $field->field_name, $value);
+            }
+        }
+        
+        // ثبت لاگ
+        workforce_log_activity(
+            get_current_user_id(),
+            'admin_update_personnel',
+            "ویرایش پرسنل توسط ادمین - ID: $personnel_id"
+        );
+        
+        wp_send_json_success([
+            'message' => 'تغییرات با موفقیت ذخیره شد.',
+            'personnel_id' => $personnel_id
+        ]);
+        
+    } catch (Exception $e) {
+        wp_send_json_error(['message' => 'خطا در ذخیره: ' . $e->getMessage()]);
+    }
+}
+
+// همچنین این AJAX handlerها را برای nonce اضافه کنید
+add_action('wp_ajax_workforce_admin_get_personnel_nonce', function() {
+    wp_send_json_success([
+        'nonce' => wp_create_nonce('workforce_admin_nonce')
+    ]);
+});
+/**
+ * تابع اصلی ویرایش پرسنل در ادمین
+ */
+function workforce_edit_personnel_admin($personnel_id) {
+    if (!current_user_can('manage_options')) {
+        wp_die('شما دسترسی لازم را ندارید.');
+    }
+    
+    $personnel = workforce_get_personnel($personnel_id);
+    if (!$personnel) {
+        echo '<div class="error"><p>پرسنل یافت نشد.</p></div>';
+        return;
+    }
+    
+    // گرفتن فیلدها و داده‌ها
+    $fields = workforce_get_all_fields();
+    $departments = workforce_get_all_departments();
+    $meta = workforce_get_personnel_meta($personnel_id);
+    
+    // پردازش فرم ذخیره
+    if (isset($_POST['submit_edit_personnel'])) {
+        $nonce = $_POST['_wpnonce'] ?? '';
+        
+        if (wp_verify_nonce($nonce, 'edit_personnel_' . $personnel_id)) {
+            // جمع‌آوری داده‌ها
+            $data = [
+                'department_id' => intval($_POST['department_id']),
+                'national_code' => sanitize_text_field($_POST['national_code']),
+                'first_name' => sanitize_text_field($_POST['first_name']),
+                'last_name' => sanitize_text_field($_POST['last_name']),
+                'employment_date' => sanitize_text_field($_POST['employment_date']),
+                'employment_type' => sanitize_text_field($_POST['employment_type']),
+                'status' => sanitize_text_field($_POST['status']),
+            ];
+            
+            // ذخیره اطلاعات اصلی
+            $result = workforce_update_personnel($personnel_id, $data);
+            
+            // ذخیره فیلدهای متا
+            $meta_updates = [];
+            foreach ($fields as $field) {
+                if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                    $field_name = 'field_' . $field->id;
+                    if (isset($_POST[$field_name])) {
+                        $value = $field->field_type === 'checkbox' ? 
+                                 (isset($_POST[$field_name]) ? '1' : '0') : 
+                                 sanitize_text_field($_POST[$field_name]);
+                        $meta_updates[$field->id] = $value;
+                    }
+                }
+            }
+            
+            // ذخیره متا
+            foreach ($meta_updates as $field_id => $value) {
+                $field = workforce_get_field($field_id);
+                if ($field) {
+                    workforce_update_personnel_meta($personnel_id, $field_id, $field->field_name, $value);
+                }
+            }
+            
+            if ($result) {
+                echo '<div class="updated"><p>تغییرات با موفقیت ذخیره شد.</p></div>';
+                // ریدایرکت به لیست
+                echo '<script>setTimeout(function(){ window.location.href = "' . admin_url('admin.php?page=workforce-personnel&tab=list') . '"; }, 1000);</script>';
+                return;
+            } else {
+                echo '<div class="error"><p>خطا در ذخیره تغییرات.</p></div>';
+            }
+        } else {
+            echo '<div class="error"><p>توکن امنیتی نامعتبر است.</p></div>';
+        }
+    }
+    
+    // نمایش فرم
+    ?>
+    <div class="wrap workforce-admin-personnel-edit">
+        <h1 class="wp-heading-inline">ویرایش پرسنل</h1>
+        <a href="<?php echo admin_url('admin.php?page=workforce-personnel&tab=list'); ?>" class="page-title-action">بازگشت به لیست</a>
+        <hr class="wp-header-end">
+        
+        <form method="post" action="">
+            <?php wp_nonce_field('edit_personnel_' . $personnel_id, '_wpnonce'); ?>
+            
+            <div class="workforce-form-sections">
+                <div class="form-section">
+                    <h3>اطلاعات پایه</h3>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row"><label for="department_id">اداره</label></th>
+                            <td>
+                                <select name="department_id" id="department_id" class="regular-text" required>
+                                    <option value="">انتخاب کنید</option>
+                                    <?php foreach ($departments as $dept): ?>
+                                        <option value="<?php echo esc_attr($dept->id); ?>" 
+                                            <?php selected($personnel->department_id, $dept->id); ?>>
+                                            <?php echo esc_html($dept->name); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="national_code">کدملی</label></th>
+                            <td>
+                                <input type="text" name="national_code" id="national_code" 
+                                       value="<?php echo esc_attr($personnel->national_code); ?>" 
+                                       class="regular-text">
+                                <p class="description">۱۰ رقم عددی</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="first_name">نام</label></th>
+                            <td>
+                                <input type="text" name="first_name" id="first_name" 
+                                       value="<?php echo esc_attr($personnel->first_name); ?>" 
+                                       class="regular-text" required>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="last_name">نام خانوادگی</label></th>
+                            <td>
+                                <input type="text" name="last_name" id="last_name" 
+                                       value="<?php echo esc_attr($personnel->last_name); ?>" 
+                                       class="regular-text" required>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="employment_date">تاریخ استخدام</label></th>
+                            <td>
+                                <input type="text" name="employment_date" id="employment_date" 
+                                       class="regular-text jdatepicker" 
+                                       value="<?php echo esc_attr($personnel->employment_date); ?>" 
+                                       required>
+                                <p class="description">فرمت: ۱۴۰۳/۰۱/۰۱</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="employment_type">نوع استخدام</label></th>
+                            <td>
+                                <select name="employment_type" id="employment_type" class="regular-text">
+                                    <option value="permanent" <?php selected($personnel->employment_type, 'permanent'); ?>>دائمی</option>
+                                    <option value="contract" <?php selected($personnel->employment_type, 'contract'); ?>>پیمانی</option>
+                                    <option value="temporary" <?php selected($personnel->employment_type, 'temporary'); ?>>موقت</option>
+                                    <option value="project" <?php selected($personnel->employment_type, 'project'); ?>>پروژه‌ای</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="status">وضعیت</label></th>
+                            <td>
+                                <select name="status" id="status" class="regular-text">
+                                    <option value="active" <?php selected($personnel->status, 'active'); ?>>فعال</option>
+                                    <option value="inactive" <?php selected($personnel->status, 'inactive'); ?>>غیرفعال</option>
+                                    <option value="suspended" <?php selected($personnel->status, 'suspended'); ?>>تعلیق</option>
+                                    <option value="retired" <?php selected($personnel->status, 'retired'); ?>>بازنشسته</option>
+                                </select>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <div class="form-section">
+                    <h3>اطلاعات تکمیلی</h3>
+                    <table class="form-table">
+                        <?php foreach ($fields as $field): ?>
+                            <?php if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])): ?>
+                                <?php
+                                $value = $meta[$field->id] ?? $meta[$field->field_name] ?? '';
+                                $required = $field->is_required ? ' required' : '';
+                                ?>
+                                <tr>
+                                    <th scope="row">
+                                        <label for="field_<?php echo esc_attr($field->id); ?>">
+                                            <?php echo esc_html($field->field_label); ?>
+                                            <?php if ($field->is_required): ?><span class="required">*</span><?php endif; ?>
+                                            <?php if ($field->is_locked): ?><span title="قفل شده">🔒</span><?php endif; ?>
+                                        </label>
+                                    </th>
+                                    <td>
+                                        <?php if ($field->field_type === 'select' && $field->options): ?>
+                                            <select id="field_<?php echo esc_attr($field->id); ?>" 
+                                                    name="field_<?php echo esc_attr($field->id); ?>"
+                                                    class="regular-text<?php echo $required; ?>">
+                                                <option value="">انتخاب کنید</option>
+                                                <?php foreach ($field->options as $option): ?>
+                                                    <option value="<?php echo esc_attr($option); ?>" 
+                                                        <?php selected($value, $option); ?>>
+                                                        <?php echo esc_html($option); ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        <?php elseif ($field->field_type === 'date'): ?>
+                                            <input type="text" id="field_<?php echo esc_attr($field->id); ?>" 
+                                                   name="field_<?php echo esc_attr($field->id); ?>"
+                                                   class="regular-text jdatepicker<?php echo $required; ?>"
+                                                   value="<?php echo esc_attr($value); ?>">
+                                        <?php elseif ($field->field_type === 'checkbox'): ?>
+                                            <input type="checkbox" id="field_<?php echo esc_attr($field->id); ?>" 
+                                                   name="field_<?php echo esc_attr($field->id); ?>"
+                                                   value="1" <?php checked($value, '1'); ?>>
+                                        <?php else: ?>
+                                            <input type="<?php echo $field->field_type === 'number' ? 'number' : 'text'; ?>" 
+                                                   id="field_<?php echo esc_attr($field->id); ?>" 
+                                                   name="field_<?php echo esc_attr($field->id); ?>"
+                                                   class="regular-text<?php echo $required; ?>"
+                                                   value="<?php echo esc_attr($value); ?>"
+                                                   <?php echo $field->field_type === 'number' ? 'step="0.01"' : ''; ?>>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </table>
+                </div>
+            </div>
+            
+            <p class="submit">
+                <button type="submit" name="submit_edit_personnel" class="button button-primary">ذخیره تغییرات</button>
+                <a href="<?php echo admin_url('admin.php?page=workforce-personnel&tab=list'); ?>" class="button">انصراف</a>
+            </p>
+        </form>
+    </div>
+    
+    <script>
+    jQuery(document).ready(function($) {
+        // فعال‌سازی datepicker
+        $('.jdatepicker').persianDatepicker({
+            format: 'YYYY/MM/DD',
+            observer: true,
+            persianDigit: false,
+            autoClose: true
+        });
+    });
+    </script>
+    <?php
+}
+// در admin-panel.php اضافه کنید:
+add_action('wp_ajax_workforce_test_simple', 'workforce_test_simple_handler');
+function workforce_test_simple_handler() {
+    // فقط یک پاسخ JSON ساده
+    wp_send_json_success([
+        'message' => 'تست موفق',
+        'data' => ['test' => 'value']
+    ]);
+    wp_die(); // مهم!
+}
+// اضافه کردن endpoint برای گرفتن nonce جدید
+add_action('wp_ajax_workforce_get_new_nonce', 'workforce_get_new_nonce_handler');
+function workforce_get_new_nonce_handler() {
+    wp_send_json_success([
+        'nonce' => wp_create_nonce('workforce_nonce')
+    ]);
+    wp_die();
+}
+/**
+ * AJAX handler برای گرفتن فرم ویرایش پرسنل
+ */
+function workforce_ajax_get_edit_form() {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'دسترسی غیرمجاز']);
+    }
+    
+    $personnel_id = intval($_POST['personnel_id'] ?? 0);
+    if (!$personnel_id) {
+        wp_send_json_error(['message' => 'شناسه نامعتبر']);
+    }
+    
+    $html = workforce_get_edit_personnel_form($personnel_id);
+    
+    wp_send_json_success([
+        'html' => $html,
+        'nonce' => wp_create_nonce('workforce_update_personnel')
+    ]);
+    wp_die();
+}
+add_action('wp_ajax_workforce_get_edit_form', 'workforce_ajax_get_edit_form');
+add_action('wp_ajax_nopriv_workforce_get_edit_form', 'workforce_ajax_get_edit_form');
+/**
+ * تست ساده AJAX برای عیب‌یابی
+ */
+add_action('wp_ajax_workforce_test', 'workforce_ajax_test');
+add_action('wp_ajax_nopriv_workforce_test', 'workforce_ajax_test');
+
+function workforce_ajax_test() {
+    error_log('=== WORKFORCE AJAX TEST CALLED ===');
+    error_log('Current User ID: ' . get_current_user_id());
+    error_log('Can manage options: ' . (current_user_can('manage_options') ? 'Yes' : 'No'));
+    
+    wp_send_json_success([
+        'message' => 'AJAX Test Successful',
+        'timestamp' => current_time('mysql'),
+        'user_id' => get_current_user_id()
+    ]);
+    wp_die(); // مهم!
+}
+/**
+ * تست nonce برای عیب‌یابی
+ */
+add_action('wp_ajax_workforce_test_nonce', 'workforce_ajax_test_nonce');
+add_action('wp_ajax_nopriv_workforce_test_nonce', 'workforce_ajax_test_nonce');
+
+function workforce_ajax_test_nonce() {
+    error_log('=== WORKFORCE NONCE TEST ===');
+    error_log('POST Data: ' . print_r($_POST, true));
+    
+    // بررسی تمام nonceهای ممکن
+    $nonce_sources = ['_wpnonce', 'nonce', 'security', '_ajax_nonce'];
+    $found_nonces = [];
+    
+    foreach ($nonce_sources as $source) {
+        if (!empty($_POST[$source])) {
+            $found_nonces[$source] = $_POST[$source];
+            error_log("Found nonce in $source: " . $_POST[$source]);
+        }
+    }
+    
+    wp_send_json_success([
+        'message' => 'Nonce test completed',
+        'found_nonces' => $found_nonces,
+        'server_time' => current_time('mysql')
+    ]);
+    wp_die();
+}
