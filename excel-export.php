@@ -1,10 +1,6 @@
 <?php
 /**
- * سیستم خروجی اکسل کاملاً مستقل - سیستم مدیریت کارکرد پرسنل بنی اسد
- * نسخه بدون نیاز به نصب - همه چیز در یک فایل
- * 
- * @package Workforce
- * @version 2.0.0
+ * سیستم خروجی اکسل پلاگین مدیریت کارکرد پرسنل
  */
 
 // جلوگیری از دسترسی مستقیم
@@ -12,1351 +8,1263 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// ==================== سیستم تاریخ شمسی داخلی ====================
-
-if (!function_exists('gregorian_to_jalali')) {
-    /**
-     * تبدیل تاریخ میلادی به شمسی
-     */
-    function gregorian_to_jalali($gy, $gm, $gd, $mod = '')
-    {
-        $g_d_m = array(0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334);
-        $gy2 = ($gm > 2) ? ($gy + 1) : $gy;
-        $days = 355666 + (365 * $gy) + ((int)(($gy2 + 3) / 4)) - ((int)(($gy2 + 99) / 100)) + ((int)(($gy2 + 399) / 400)) + $gd + $g_d_m[$gm - 1];
-        $jy = -1595 + (33 * ((int)($days / 12053)));
-        $days %= 12053;
-        $jy += 4 * ((int)($days / 1461));
-        $days %= 1461;
-        if ($days > 365) {
-            $jy += (int)(($days - 1) / 365);
-            $days = ($days - 1) % 365;
-        }
-        if ($days < 186) {
-            $jm = 1 + (int)($days / 31);
-            $jd = 1 + ($days % 31);
-        } else {
-            $jm = 7 + (int)(($days - 186) / 30);
-            $jd = 1 + (($days - 186) % 30);
-        }
-        return ($mod == '') ? array($jy, $jm, $jd) : $jy . $mod . $jm . $mod . $jd;
+/**
+ * کلاس مدیریت خروجی اکسل
+ */
+class Workforce_Excel_Export {
+    
+    private $template;
+    
+    public function __construct() {
+        // گرفتن قالب پیش‌فرض
+        $this->template = $this->get_excel_template();
     }
-}
-
-if (!function_exists('jalali_to_gregorian')) {
+    
     /**
-     * تبدیل تاریخ شمسی به میلادی
+     * خروجی اکسل برای مدیر اداره
      */
-    function jalali_to_gregorian($jy, $jm, $jd, $mod = '')
-    {
-        $jy += 1595;
-        $days = -355668 + (365 * $jy) + (((int)($jy / 33)) * 8) + ((int)((($jy % 33) + 3) / 4)) + $jd + (($jm < 7) ? ($jm - 1) * 31 : (($jm - 7) * 30) + 186);
-        $gy = 400 * ((int)($days / 146097));
-        $days %= 146097;
-        if ($days > 36524) {
-            $gy += 100 * ((int)(--$days / 36524));
-            $days %= 36524;
-            if ($days >= 365) $days++;
-        }
-        $gy += 4 * ((int)($days / 1461));
-        $days %= 1461;
-        if ($days > 365) {
-            $gy += (int)(($days - 1) / 365);
-            $days = ($days - 1) % 365;
-        }
-        $gd = $days + 1;
-        $sal_a = array(0, 31, (($gy % 4 == 0 and $gy % 100 != 0) or ($gy % 400 == 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31);
-        for ($gm = 0; $gm < 13 and $gd > $sal_a[$gm]; $gm++) $gd -= $sal_a[$gm];
-        return ($mod == '') ? array($gy, $gm, $gd) : $gy . $mod . $gm . $mod . $gd;
-    }
-}
-
-if (!function_exists('wf_convert_to_jalali')) {
-    /**
-     * تبدیل تاریخ به شمسی با فرمت دلخواه
-     */
-    function wf_convert_to_jalali($date, $format = 'Y/m/d')
-    {
-        if (empty($date) || $date == '0000-00-00' || $date == '0000-00-00 00:00:00') {
-            return '';
+    public function export_excel() {
+        // بررسی دسترسی
+        if (!is_user_logged_in()) {
+            wp_die('لطفا ابتدا وارد شوید.');
         }
         
-        // اگر تاریخ میلادی است
-        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $date, $matches)) {
-            $year = (int)$matches[1];
-            $month = (int)$matches[2];
-            $day = (int)$matches[3];
-            
-            list($jy, $jm, $jd) = gregorian_to_jalali($year, $month, $day);
-            
-            // فرمت‌دهی
-            $replacements = array(
-                'Y' => sprintf('%04d', $jy),
-                'y' => sprintf('%02d', $jy % 100),
-                'm' => sprintf('%02d', $jm),
-                'n' => $jm,
-                'd' => sprintf('%02d', $jd),
-                'j' => $jd
-            );
-            
-            $result = $format;
-            foreach ($replacements as $key => $value) {
-                $result = str_replace($key, $value, $result);
+        $current_user = wp_get_current_user();
+        $user_id = $current_user->ID;
+        
+        // فقط مدیران اداره و سازمان می‌توانند خروجی بگیرند
+        if (!in_array('workforce_dept_manager', $current_user->roles) && 
+            !in_array('workforce_org_manager', $current_user->roles)) {
+            wp_die('شما دسترسی لازم را ندارید.');
+        }
+        
+        $department_id = intval($_GET['department_id'] ?? 0);
+        $period_id = isset($_GET['period_id']) ? intval($_GET['period_id']) : null;
+        $filters = isset($_GET['filters']) ? json_decode(stripslashes($_GET['filters']), true) : [];
+        $search = sanitize_text_field($_GET['search'] ?? '');
+        
+        // اعتبارسنجی
+        if (in_array('workforce_dept_manager', $current_user->roles)) {
+            // مدیر اداره فقط می‌تواند از اداره خودش خروجی بگیرد
+            $user_departments = workforce_get_user_departments($user_id);
+            if (empty($user_departments)) {
+                wp_die('شما به هیچ اداره‌ای دسترسی ندارید.');
             }
             
-            return $result;
-        }
-        
-        // اگر تاریخ شمسی است
-        if (preg_match('/^(\d{4})\/(\d{2})\/(\d{2})/', $date, $matches)) {
-            return $date;
-        }
-        
-        return $date;
-    }
-}
-
-if (!function_exists('wf_current_jalali_date')) {
-    /**
-     * تاریخ شمسی امروز
-     */
-    function wf_current_jalali_date($format = 'Y/m/d')
-    {
-        $current_time = current_time('timestamp');
-        $year = date('Y', $current_time);
-        $month = date('m', $current_time);
-        $day = date('d', $current_time);
-        
-        return wf_convert_to_jalali("$year-$month-$day", $format);
-    }
-}
-
-// ==================== کلاس PHPExcel داخلی ====================
-
-// بررسی وجود کلاس PHPExcel
-if (!class_exists('PHPExcel')) {
-    /**
-     * کلاس PHPExcel شبه‌ساز - برای مواقعی که PHPExcel نصب نیست
-     * فقط توابع ضروری را پیاده‌سازی می‌کند
-     */
-    class WF_MiniExcel {
-        private $data = array();
-        private $current_sheet = 0;
-        private $sheets = array();
-        private $styles = array();
-        private $properties = array(
-            'creator' => 'سیستم مدیریت کارکرد پرسنل',
-            'title' => 'گزارش پرسنل',
-            'description' => 'تولید شده توسط سیستم بنی اسد'
-        );
-        
-        public function __construct() {
-            $this->sheets[0] = array(
-                'title' => 'گزارش',
-                'data' => array(),
-                'columns' => array(),
-                'styles' => array()
-            );
-        }
-        
-        public function getActiveSheet() {
-            return $this;
-        }
-        
-        public function setCellValue($cell, $value) {
-            $this->sheets[$this->current_sheet]['data'][$cell] = $value;
-            return $this;
-        }
-        
-        public function mergeCells($range) {
-            $this->sheets[$this->current_sheet]['merged'][] = $range;
-            return $this;
-        }
-        
-        public function getStyle($cell) {
-            if (!isset($this->sheets[$this->current_sheet]['styles'][$cell])) {
-                $this->sheets[$this->current_sheet]['styles'][$cell] = new WF_MiniExcel_Style();
-            }
-            return $this->sheets[$this->current_sheet]['styles'][$cell];
-        }
-        
-        public function getColumnDimension($column) {
-            return new WF_MiniExcel_Column($column);
-        }
-        
-        public function getRowDimension($row) {
-            return new WF_MiniExcel_Row($row);
-        }
-        
-        public function setTitle($title) {
-            $this->sheets[$this->current_sheet]['title'] = $title;
-            return $this;
-        }
-        
-        public function setRightToLeft($value) {
-            $this->sheets[$this->current_sheet]['rtl'] = $value;
-            return $this;
-        }
-        
-        public function generateXLSX() {
-            // تولید فایل Excel ساده
-            return $this->generateSimpleExcel();
-        }
-        
-        private function generateSimpleExcel() {
-            $filename = 'report_' . date('Y-m-d_H-i-s') . '.xlsx';
-            $filepath = WP_CONTENT_DIR . '/uploads/workforce_exports/' . $filename;
+            $user_dept_ids = array_map(function($dept) {
+                return $dept->id;
+            }, $user_departments);
             
-            // در نسخه واقعی، اینجا فایل Excel تولید می‌شود
-            // فعلاً فقط یک فایل متنی ساده ایجاد می‌کنیم
-            
-            $content = "گزارش پرسنل - سیستم بنی اسد\n";
-            $content .= "تاریخ تولید: " . wf_current_jalali_date('Y/m/d H:i') . "\n\n";
-            
-            if (!empty($this->sheets[$this->current_sheet]['data'])) {
-                foreach ($this->sheets[$this->current_sheet]['data'] as $cell => $value) {
-                    $content .= "$cell: $value\n";
-                }
+            if ($department_id > 0 && !in_array($department_id, $user_dept_ids)) {
+                wp_die('شما دسترسی به این اداره را ندارید.');
             }
             
-            wp_mkdir_p(dirname($filepath));
-            file_put_contents($filepath, $content);
-            
-            return array(
-                'filename' => $filename,
-                'filepath' => $filepath,
-                'url' => content_url('/uploads/workforce_exports/' . $filename)
-            );
-        }
-    }
-    
-    class WF_MiniExcel_Style {
-        private $properties = array();
-        
-        public function applyFromArray($style) {
-            $this->properties = array_merge($this->properties, $style);
-            return $this;
+            // اگر department_id مشخص نشده، از اولین اداره کاربر استفاده کن
+            if ($department_id == 0 && !empty($user_departments)) {
+                $department_id = $user_departments[0]->id;
+            }
         }
         
-        public function getFont() {
-            return $this;
+        // بررسی وجود کتابخانه PHPExcel
+        if (!class_exists('PHPExcel')) {
+            // استفاده از کتابخانه داخلی یا جایگزین
+            $this->export_csv_fallback($department_id, $period_id, $filters, $search);
+            return;
         }
         
-        public function getAlignment() {
-            return $this;
-        }
+        // ایجاد شیء PHPExcel
+        $objPHPExcel = new PHPExcel();
         
-        public function getNumberFormat() {
-            return $this;
-        }
+        // تنظیم خصوصیات سند
+        $objPHPExcel->getProperties()
+            ->setCreator("پلاگین مدیریت کارکرد پرسنل - بنی اسد")
+            ->setLastModifiedBy("سیستم مدیریت پرسنل")
+            ->setTitle("گزارش پرسنل")
+            ->setSubject("گزارش پرسنل")
+            ->setDescription("گزارش خروجی پرسنل")
+            ->setKeywords("پرسنل گزارش اکسل")
+            ->setCategory("گزارش");
         
-        public function setBold($value) { return $this; }
-        public function setSize($value) { return $this; }
-        public function setName($value) { return $this; }
-        public function setColor($value) { return $this; }
-        public function setHorizontal($value) { return $this; }
-        public function setVertical($value) { return $this; }
-        public function setWrapText($value) { return $this; }
-        public function setFormatCode($value) { return $this; }
-    }
-    
-    class WF_MiniExcel_Column {
-        private $column;
+        // تنظیم شیت فعال
+        $objPHPExcel->setActiveSheetIndex(0);
+        $sheet = $objPHPExcel->getActiveSheet();
+        $sheet->setTitle('گزارش پرسنل');
         
-        public function __construct($column) {
-            $this->column = $column;
-        }
+        // تنظیم جهت راست به چپ
+        $sheet->setRightToLeft(true);
         
-        public function setAutoSize($value) { return $this; }
-        public function setWidth($value) { return $this; }
-    }
-    
-    class WF_MiniExcel_Row {
-        private $row;
-        
-        public function __construct($row) {
-            $this->row = $row;
-        }
-        
-        public function setRowHeight($value) { return $this; }
-    }
-    
-    // تعریف کلاس اصلی با شبه‌ساز
-    class PHPExcel extends WF_MiniExcel {}
-    
-} else {
-    // اگر PHPExcel از قبل نصب است، از همان استفاده می‌کنیم
-    require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-base.php';
-    require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-direct.php';
-}
-
-// ==================== کلاس اصلی خروجی اکسل ====================
-
-class WF_Excel_Exporter_Standalone {
-    
-    private $excel;
-    private $worksheet;
-    private $current_row = 1;
-    private $template_settings = array();
-    private $fields = array();
-    private $data = array();
-    private $use_html_excel = false;
-    
-    /**
-     * سازنده کلاس
-     */
-    public function __construct($template_id = null) {
-        // بررسی اگر PHPExcel واقعی موجود است
-        if (class_exists('PHPExcel') && !is_a('PHPExcel', 'WF_MiniExcel', false)) {
-            $this->excel = new PHPExcel();
-            $this->worksheet = $this->excel->getActiveSheet();
-        } else {
-            // استفاده از شبه‌ساز
-            $this->excel = new WF_MiniExcel();
-            $this->worksheet = $this->excel->getActiveSheet();
-            $this->use_html_excel = true;
-        }
-        
-        // تنظیم جهت راست‌به‌چپ
-        $this->worksheet->setRightToLeft(true);
-        
-        // بارگذاری قالب
-        $this->load_template($template_id);
-        
-        // تنظیمات پیش‌فرض
-        if (!$this->use_html_excel) {
-            $this->excel->getProperties()
-                ->setCreator("سیستم مدیریت کارکرد پرسنل بنی اسد")
-                ->setTitle("گزارش کارکرد پرسنل")
-                ->setDescription("تولید شده توسط سیستم مدیریت کارکرد پرسنل");
-        }
-    }
-    
-    /**
-     * بارگذاری قالب
-     */
-    private function load_template($template_id = null) {
-        // تنظیمات پیش‌فرض
-        $this->template_settings = array(
-            'header' => array(
-                'bg_color' => '2E86C1',
-                'font_color' => 'FFFFFF',
-                'font_size' => 14,
-                'font_bold' => true,
-                'alignment' => 'center',
-                'height' => 35
-            ),
-            'data' => array(
-                'even_row_color' => 'F2F3F4',
-                'odd_row_color' => 'FFFFFF',
-                'font_color' => '2C3E50',
-                'font_size' => 11,
-                'alignment' => 'right',
-                'height' => 25,
-                'auto_filter' => false
-            ),
-            'borders' => array(
-                'style' => 'thin',
-                'color' => 'D5D8DC'
-            ),
-            'columns' => array(
-                'auto_width' => true,
-                'wrap_text' => true
-            ),
-            'footer' => array(
-                'include' => true,
-                'text' => 'تولید شده توسط سیستم مدیریت کارکرد پرسنل بنی اسد | تاریخ تولید: {DATE}',
-                'font_size' => 9,
-                'font_color' => '7F8C8D'
-            )
-        );
-    }
-    
-    /**
-     * تنظیم فیلدها
-     */
-    public function set_fields($fields) {
-        $this->fields = $fields;
-        return $this;
-    }
-    
-    /**
-     * تنظیم داده‌ها
-     */
-    public function set_data($data) {
-        $this->data = $data;
-        return $this;
-    }
-    
-    /**
-     * تولید فایل اکسل
-     */
-    public function generate($filename = 'report', $options = array()) {
-        if ($this->use_html_excel) {
-            // استفاده از سیستم ساده HTML Excel
-            return $this->generate_html_excel($filename, $options);
-        }
+        // گرفتن داده‌ها
+        $data = $this->get_export_data($department_id, $period_id, $filters, $search);
         
         // ایجاد هدر
-        $this->create_header($options);
+        $headers = ['ردیف', 'کدملی', 'نام', 'نام خانوادگی', 'نام اداره', 'تاریخ استخدام', 'نوع استخدام', 'وضعیت'];
         
-        // ایجاد داده‌ها
-        $this->create_data_rows();
-        
-        // ایجاد فوتر
-        if ($this->template_settings['footer']['include']) {
-            $this->create_footer();
-        }
-        
-        // تنظیمات ستون‌ها
-        $this->apply_column_settings();
-        
-        // تنظیمات صفحه
-        $this->apply_page_settings();
-        
-        // ذخیره فایل
-        return $this->save_excel_file($filename);
-    }
-    
-    /**
-     * ایجاد هدر
-     */
-    private function create_header($options) {
-        $header_style = $this->template_settings['header'];
-        
-        // عنوان گزارش
-        $title = isset($options['title']) ? $options['title'] : 'گزارش کارکرد پرسنل';
-        
-        $this->worksheet->setCellValue('A' . $this->current_row, $title);
-        $this->worksheet->mergeCells('A' . $this->current_row . ':' . $this->get_column_letter(count($this->fields) - 1) . $this->current_row);
-        
-        // اعمال استایل
-        $this->worksheet->getStyle('A' . $this->current_row)->applyFromArray(array(
-            'font' => array(
-                'bold' => true,
-                'size' => 16,
-                'color' => array('rgb' => $header_style['font_color'])
-            ),
-            'alignment' => array(
-                'horizontal' => PHPExcel_Style_Alignment::HORIZONTAL_CENTER,
-                'vertical' => PHPExcel_Style_Alignment::VERTICAL_CENTER
-            ),
-            'fill' => array(
-                'type' => PHPExcel_Style_Fill::FILL_SOLID,
-                'color' => array('rgb' => $header_style['bg_color'])
-            )
-        ));
-        
-        $this->worksheet->getRowDimension($this->current_row)->setRowHeight($header_style['height']);
-        
-        $this->current_row += 2;
-        
-        // اطلاعات گزارش
-        $this->create_report_info($options);
-        $this->current_row += 2;
-        
-        // هدر ستون‌ها
-        $this->create_column_headers();
-        $this->current_row++;
-    }
-    
-    /**
-     * ایجاد اطلاعات گزارش
-     */
-    private function create_report_info($options) {
-        $info_row = $this->current_row;
-        
-        // تاریخ تولید
-        $this->worksheet->setCellValue('A' . $info_row, 'تاریخ تولید:');
-        $this->worksheet->setCellValue('B' . $info_row, wf_current_jalali_date('Y/m/d H:i'));
-        
-        // تعداد رکوردها
-        $this->worksheet->setCellValue('D' . $info_row, 'تعداد رکورد:');
-        $this->worksheet->setCellValue('E' . $info_row, number_format(count($this->data)));
-        
-        // مدیر گزارش
-        $manager_name = isset($options['manager_name']) ? $options['manager_name'] : 'سیستم';
-        $this->worksheet->setCellValue('G' . $info_row, 'مدیر گزارش:');
-        $this->worksheet->setCellValue('H' . $info_row, $manager_name);
-        
-        // استایل اطلاعات
-        $this->worksheet->getStyle('A' . $info_row . ':H' . $info_row)->applyFromArray(array(
-            'font' => array(
-                'bold' => true,
-                'color' => array('rgb' => '2C3E50')
-            )
-        ));
-    }
-    
-    /**
-     * ایجاد هدر ستون‌ها
-     */
-    private function create_column_headers() {
-        $header_style = $this->template_settings['header'];
-        $border_style = $this->template_settings['borders'];
-        
-        $header_row = $this->current_row;
-        $col_index = 0;
-        
-        foreach ($this->fields as $field) {
-            $col_letter = $this->get_column_letter($col_index);
-            $this->worksheet->setCellValue($col_letter . $header_row, $field['field_name']);
-            
-            // اعمال استایل
-            $style = array(
-                'font' => array(
-                    'bold' => $header_style['font_bold'],
-                    'color' => array('rgb' => $header_style['font_color']),
-                    'size' => $header_style['font_size']
-                ),
-                'alignment' => array(
-                    'horizontal' => PHPExcel_Style_Alignment::HORIZONTAL_CENTER,
-                    'vertical' => PHPExcel_Style_Alignment::VERTICAL_CENTER,
-                    'wrapText' => true
-                ),
-                'fill' => array(
-                    'type' => PHPExcel_Style_Fill::FILL_SOLID,
-                    'color' => array('rgb' => $header_style['bg_color'])
-                ),
-                'borders' => array(
-                    'allborders' => array(
-                        'borderStyle' => $border_style['style'],
-                        'color' => array('rgb' => $border_style['color'])
-                    )
-                )
-            );
-            
-            $this->worksheet->getStyle($col_letter . $header_row)->applyFromArray($style);
-            $this->worksheet->getRowDimension($header_row)->setRowHeight($header_style['height']);
-            
-            $col_index++;
-        }
-    }
-    
-    /**
-     * ایجاد ردیف‌های داده
-     */
-    private function create_data_rows() {
-        $data_style = $this->template_settings['data'];
-        $border_style = $this->template_settings['borders'];
-        
-        foreach ($this->data as $index => $row) {
-            $col_index = 0;
-            
-            // تعیین رنگ ردیف
-            $fill_color = $index % 2 == 0 ? $data_style['even_row_color'] : $data_style['odd_row_color'];
-            
-            foreach ($this->fields as $field) {
-                $col_letter = $this->get_column_letter($col_index);
-                $cell_address = $col_letter . $this->current_row;
-                
-                // مقدار سلول
-                $value = $this->get_cell_value($row, $field);
-                $this->worksheet->setCellValue($cell_address, $value);
-                
-                // تنظیم فرمت
-                $this->apply_cell_format($cell_address, $field['field_type']);
-                
-                $col_index++;
-            }
-            
-            // اعمال استایل به کل ردیف
-            $row_range = 'A' . $this->current_row . ':' . $this->get_column_letter(count($this->fields) - 1) . $this->current_row;
-            
-            $row_style = array(
-                'fill' => array(
-                    'type' => PHPExcel_Style_Fill::FILL_SOLID,
-                    'color' => array('rgb' => $fill_color)
-                ),
-                'font' => array(
-                    'color' => array('rgb' => $data_style['font_color']),
-                    'size' => $data_style['font_size']
-                ),
-                'alignment' => array(
-                    'horizontal' => PHPExcel_Style_Alignment::HORIZONTAL_RIGHT,
-                    'vertical' => PHPExcel_Style_Alignment::VERTICAL_CENTER,
-                    'wrapText' => $this->template_settings['columns']['wrap_text']
-                ),
-                'borders' => array(
-                    'allborders' => array(
-                        'borderStyle' => $border_style['style'],
-                        'color' => array('rgb' => $border_style['color'])
-                    )
-                )
-            );
-            
-            $this->worksheet->getStyle($row_range)->applyFromArray($row_style);
-            $this->worksheet->getRowDimension($this->current_row)->setRowHeight($data_style['height']);
-            
-            $this->current_row++;
-        }
-    }
-    
-    /**
-     * دریافت مقدار سلول
-     */
-    private function get_cell_value($row, $field) {
-        $value = '';
-        
-        if (isset($row['data'][$field['field_key']])) {
-            $value = $row['data'][$field['field_key']];
-        } elseif (isset($row[$field['field_key']])) {
-            $value = $row[$field['field_key']];
-        }
-        
-        // فرمت‌دهی بر اساس نوع فیلد
-        switch ($field['field_type']) {
-            case 'date':
-                if ($value) {
-                    $value = wf_convert_to_jalali($value, 'Y/m/d');
-                }
-                break;
-                
-            case 'datetime':
-                if ($value) {
-                    $value = wf_convert_to_jalali($value, 'Y/m/d H:i');
-                }
-                break;
-                
-            case 'number':
-                if (is_numeric($value)) {
-                    $value = number_format($value, 0, '.', ',');
-                }
-                break;
-                
-            case 'decimal':
-            case 'float':
-                if (is_numeric($value)) {
-                    $value = number_format($value, 2, '.', ',');
-                }
-                break;
-                
-            case 'currency':
-                if (is_numeric($value)) {
-                    $value = number_format($value, 0, '.', ',') . ' ریال';
-                }
-                break;
-                
-            case 'checkbox':
-            case 'boolean':
-                $value = $value ? '✅' : '❌';
-                break;
-        }
-        
-        return $value;
-    }
-    
-    /**
-     * اعمال فرمت سلول
-     */
-    private function apply_cell_format($cell_address, $field_type) {
-        switch ($field_type) {
-            case 'number':
-                $this->worksheet->getStyle($cell_address)
-                    ->getNumberFormat()
-                    ->setFormatCode('#,##0');
-                break;
-                
-            case 'decimal':
-                $this->worksheet->getStyle($cell_address)
-                    ->getNumberFormat()
-                    ->setFormatCode('#,##0.00');
-                break;
-                
-            case 'date':
-                $this->worksheet->getStyle($cell_address)
-                    ->getNumberFormat()
-                    ->setFormatCode('yyyy/mm/dd;@');
-                break;
-                
-            case 'datetime':
-                $this->worksheet->getStyle($cell_address)
-                    ->getNumberFormat()
-                    ->setFormatCode('yyyy/mm/dd hh:mm;@');
-                break;
-        }
-    }
-    
-    /**
-     * ایجاد فوتر
-     */
-    private function create_footer() {
-        $footer_style = $this->template_settings['footer'];
-        
-        $this->current_row++;
-        
-        $footer_text = str_replace(
-            '{DATE}',
-            wf_current_jalali_date('Y/m/d H:i'),
-            $footer_style['text']
-        );
-        
-        $this->worksheet->setCellValue('A' . $this->current_row, $footer_text);
-        $this->worksheet->mergeCells('A' . $this->current_row . ':' . 
-            $this->get_column_letter(count($this->fields) - 1) . $this->current_row);
-        
-        $this->worksheet->getStyle('A' . $this->current_row)->applyFromArray(array(
-            'font' => array(
-                'size' => $footer_style['font_size'],
-                'color' => array('rgb' => $footer_style['font_color']),
-                'italic' => true
-            ),
-            'alignment' => array(
-                'horizontal' => PHPExcel_Style_Alignment::HORIZONTAL_CENTER,
-                'vertical' => PHPExcel_Style_Alignment::VERTICAL_CENTER
-            )
-        ));
-    }
-    
-    /**
-     * تنظیمات ستون‌ها
-     */
-    private function apply_column_settings() {
-        if ($this->template_settings['columns']['auto_width']) {
-            foreach (range(0, count($this->fields) - 1) as $col_index) {
-                $col_letter = $this->get_column_letter($col_index);
-                $this->worksheet->getColumnDimension($col_letter)->setAutoSize(true);
+        // اضافه کردن فیلدهای متا به هدر
+        $fields = workforce_get_all_fields();
+        foreach ($fields as $field) {
+            if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                $headers[] = $field->field_label;
             }
         }
         
-        // تنظیم عرض مناسب برای ستون‌های خاص
-        foreach ($this->fields as $index => $field) {
-            $col_letter = $this->get_column_letter($index);
+        // نوشتن هدر
+        $col = 0;
+        foreach ($headers as $header) {
+            $cell = PHPExcel_Cell::stringFromColumnIndex($col) . '1';
+            $sheet->setCellValue($cell, $header);
             
-            switch ($field['field_type']) {
-                case 'date':
-                    $this->worksheet->getColumnDimension($col_letter)->setWidth(12);
-                    break;
-                    
-                case 'datetime':
-                    $this->worksheet->getColumnDimension($col_letter)->setWidth(16);
-                    break;
-                    
-                case 'checkbox':
-                    $this->worksheet->getColumnDimension($col_letter)->setWidth(8);
-                    break;
-                    
-                case 'number':
-                case 'decimal':
-                    $this->worksheet->getColumnDimension($col_letter)->setWidth(15);
-                    break;
-                    
-                default:
-                    if ($this->template_settings['columns']['auto_width']) {
-                        $this->worksheet->getColumnDimension($col_letter)->setAutoSize(true);
-                    }
-                    break;
-            }
+            // اعمال استایل به هدر
+            $this->apply_header_style($sheet, $cell);
+            $col++;
         }
-    }
-    
-    /**
-     * تنظیمات صفحه
-     */
-    private function apply_page_settings() {
-        $this->worksheet->getPageSetup()->setOrientation(PHPExcel_Worksheet_PageSetup::ORIENTATION_LANDSCAPE);
         
-        $this->worksheet->getPageMargins()->setTop(0.5);
-        $this->worksheet->getPageMargins()->setRight(0.3);
-        $this->worksheet->getPageMargins()->setLeft(0.3);
-        $this->worksheet->getPageMargins()->setBottom(0.5);
-        
-        $this->worksheet->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd(1, 5);
-        $this->worksheet->getPageSetup()->setFitToWidth(1);
-        $this->worksheet->getPageSetup()->setFitToHeight(0);
-        $this->worksheet->getPageSetup()->setHorizontalCentered(true);
-    }
-    
-    /**
-     * ذخیره فایل Excel
-     */
-    private function save_excel_file($filename) {
-        $filename = sanitize_file_name($filename . '_' . date('Y-m-d_H-i-s') . '.xlsx');
-        $filepath = WP_CONTENT_DIR . '/uploads/workforce_exports/' . $filename;
-        
-        wp_mkdir_p(dirname($filepath));
-        
-        // ایجاد Writer
-        $writer = PHPExcel_IOFactory::createWriter($this->excel, 'Excel2007');
-        $writer->save($filepath);
-        
-        return array(
-            'success' => true,
-            'filename' => $filename,
-            'filepath' => $filepath,
-            'url' => content_url('/uploads/workforce_exports/' . $filename),
-            'size' => filesize($filepath),
-            'generated_at' => wf_current_jalali_date('Y/m/d H:i:s'),
-            'records_count' => count($this->data)
-        );
-    }
-    
-    /**
-     * تولید Excel HTML (برای مواقعی که PHPExcel نیست)
-     */
-    private function generate_html_excel($filename, $options) {
-        $filename = sanitize_file_name($filename . '_' . date('Y-m-d_H-i-s') . '.html');
-        $filepath = WP_CONTENT_DIR . '/uploads/workforce_exports/' . $filename;
-        
-        wp_mkdir_p(dirname($filepath));
-        
-        // تولید HTML
-        $html = '<!DOCTYPE html>
-        <html dir="rtl">
-        <head>
-            <meta charset="UTF-8">
-            <title>گزارش پرسنل</title>
-            <style>
-                body { font-family: Tahoma, sans-serif; margin: 20px; }
-                table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-                th { background-color: #2E86C1; color: white; padding: 12px; text-align: center; border: 1px solid #1B4F72; }
-                td { padding: 10px; border: 1px solid #ddd; text-align: right; }
-                tr:nth-child(even) { background-color: #f2f3f4; }
-                tr:nth-child(odd) { background-color: white; }
-                .header { background: #2E86C1; color: white; padding: 20px; text-align: center; margin-bottom: 20px; }
-                .footer { margin-top: 30px; text-align: center; color: #7f8c8d; font-size: 12px; }
-                .info { margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-right: 4px solid #2E86C1; }
-                .checkbox-true { color: green; }
-                .checkbox-false { color: red; }
-            </style>
-        </head>
-        <body>';
-        
-        // هدر
-        $title = isset($options['title']) ? $options['title'] : 'گزارش کارکرد پرسنل';
-        $html .= '<div class="header">
-            <h1>' . esc_html($title) . '</h1>
-            <p>سیستم مدیریت کارکرد پرسنل بنی اسد</p>
-        </div>';
-        
-        // اطلاعات گزارش
-        $html .= '<div class="info">
-            <strong>تاریخ تولید:</strong> ' . wf_current_jalali_date('Y/m/d H:i') . ' | 
-            <strong>تعداد رکوردها:</strong> ' . number_format(count($this->data)) . ' | 
-            <strong>مدیر گزارش:</strong> ' . (isset($options['manager_name']) ? esc_html($options['manager_name']) : 'سیستم') . '
-        </div>';
-        
-        // جدول داده‌ها
-        if (!empty($this->fields) && !empty($this->data)) {
-            $html .= '<table>';
+        // نوشتن داده‌ها
+        $row = 2;
+        foreach ($data as $index => $item) {
+            $col = 0;
             
-            // هدر جدول
-            $html .= '<thead><tr>';
-            foreach ($this->fields as $field) {
-                $html .= '<th>' . esc_html($field['field_name']) . '</th>';
-            }
-            $html .= '</tr></thead>';
+            // ردیف
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $index + 1);
             
-            // داده‌ها
-            $html .= '<tbody>';
-            foreach ($this->data as $index => $row) {
-                $row_class = ($index % 2 == 0) ? 'even' : 'odd';
-                $html .= '<tr class="' . $row_class . '">';
-                
-                foreach ($this->fields as $field) {
-                    $value = $this->get_cell_value($row, $field);
-                    
-                    // کلاس مخصوص برای چک‌باکس
-                    $cell_class = '';
-                    if ($field['field_type'] == 'checkbox' || $field['field_type'] == 'boolean') {
-                        $cell_class = $value == '✅' ? 'checkbox-true' : 'checkbox-false';
-                    }
-                    
-                    $html .= '<td class="' . $cell_class . '">' . esc_html($value) . '</td>';
+            // اطلاعات پایه
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $item['national_code']);
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $item['first_name']);
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $item['last_name']);
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $item['department_name']);
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $item['employment_date']);
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $item['employment_type']);
+            $sheet->setCellValueByColumnAndIndex($col++, $row, $item['status']);
+            
+            // فیلدهای متا
+            foreach ($fields as $field) {
+                if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                    $value = $item['meta'][$field->id] ?? $item['meta'][$field->field_name] ?? '';
+                    $sheet->setCellValueByColumnAndIndex($col++, $row, $value);
                 }
-                
-                $html .= '</tr>';
             }
-            $html .= '</tbody></table>';
-        } else {
-            $html .= '<p style="text-align: center; color: #7f8c8d; padding: 40px;">داده‌ای برای نمایش وجود ندارد.</p>';
+            
+            // اعمال استایل به سطر
+            $this->apply_data_row_style($sheet, $row, $col, $index + 1);
+            $row++;
         }
         
-        // فوتر
-        $html .= '<div class="footer">
-            <p>تولید شده توسط سیستم مدیریت کارکرد پرسنل بنی اسد</p>
-            <p>' . wf_current_jalali_date('Y/m/d H:i:s') . '</p>
-        </div>';
+        // تنظیم عرض ستون‌ها به صورت خودکار
+        foreach (range('A', PHPExcel_Cell::stringFromColumnIndex(count($headers) - 1)) as $columnID) {
+            $sheet->getColumnDimension($columnID)->setAutoSize(true);
+        }
         
-        $html .= '</body></html>';
+        // اعمال border به همه سلول‌ها
+        $lastColumn = PHPExcel_Cell::stringFromColumnIndex(count($headers) - 1);
+        $lastRow = $row - 1;
         
-        // ذخیره فایل
-        file_put_contents($filepath, $html);
+        $styleArray = [
+            'borders' => [
+                'allborders' => [
+                    'style' => $this->get_border_style($this->template->border_style),
+                    'color' => ['rgb' => ltrim($this->template->border_color, '#')]
+                ]
+            ]
+        ];
         
-        // همچنین یک فایل Excel ساده هم ایجاد می‌کنیم
-        $csv_filename = str_replace('.html', '.csv', $filename);
-        $csv_filepath = str_replace('.html', '.csv', $filepath);
+        $sheet->getStyle("A1:{$lastColumn}{$lastRow}")->applyFromArray($styleArray);
         
-        $this->generate_csv_file($csv_filepath, $options);
+        // تنظیم ارتفاع سطر هدر
+        $sheet->getRowDimension(1)->setRowHeight(30);
         
-        return array(
-            'success' => true,
-            'filename' => $filename,
-            'csv_filename' => $csv_filename,
-            'filepath' => $filepath,
-            'csv_filepath' => $csv_filepath,
-            'url' => content_url('/uploads/workforce_exports/' . $filename),
-            'csv_url' => content_url('/uploads/workforce_exports/' . $csv_filename),
-            'generated_at' => wf_current_jalali_date('Y/m/d H:i:s'),
-            'records_count' => count($this->data),
-            'format' => $this->use_html_excel ? 'html' : 'excel'
-        );
+        // فریز کردن هدر
+        $sheet->freezePane('A2');
+        
+        // هدر برای دانلود
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="گزارش_پرسنل_' . date('Y-m-d_H-i') . '.xlsx"');
+        header('Cache-Control: max-age=0');
+        
+        // ایجاد Writer و خروجی
+        $objWriter = PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel2007');
+        $objWriter->save('php://output');
+        
+        exit;
     }
     
     /**
-     * تولید فایل CSV
+     * خروجی اکسل برای مدیر سازمان
      */
-    private function generate_csv_file($filepath, $options) {
-        $fp = fopen($filepath, 'w');
-        
-        // هدر CSV
-        $headers = array();
-        foreach ($this->fields as $field) {
-            $headers[] = $field['field_name'];
+    public function export_org_excel() {
+        // بررسی دسترسی
+        if (!is_user_logged_in()) {
+            wp_die('لطفا ابتدا وارد شوید.');
         }
-        fputcsv($fp, $headers);
         
-        // داده‌های CSV
-        foreach ($this->data as $row) {
-            $csv_row = array();
-            foreach ($this->fields as $field) {
-                $value = $this->get_cell_value($row, $field);
-                // حذف ایموجی برای CSV
-                if ($value == '✅') $value = 'بله';
-                if ($value == '❌') $value = 'خیر';
-                $csv_row[] = $value;
+        $current_user = wp_get_current_user();
+        
+        // فقط مدیر سازمان می‌تواند خروجی سازمانی بگیرد
+        if (!in_array('workforce_org_manager', $current_user->roles)) {
+            wp_die('شما دسترسی لازم را ندارید.');
+        }
+        
+        $department_id = $_GET['department_id'] ? intval($_GET['department_id']) : null;
+        $status = sanitize_text_field($_GET['status'] ?? '');
+        $search = sanitize_text_field($_GET['search'] ?? '');
+        
+        // بررسی وجود کتابخانه PHPExcel
+        if (!class_exists('PHPExcel')) {
+            // استفاده از CSV به عنوان جایگزین
+            $this->export_org_csv_fallback($department_id, $status, $search);
+            return;
+        }
+        
+        // ایجاد شیء PHPExcel
+        $objPHPExcel = new PHPExcel();
+        
+        // تنظیم خصوصیات سند
+        $objPHPExcel->getProperties()
+            ->setCreator("پلاگین مدیریت کارکرد پرسنل - بنی اسد")
+            ->setLastModifiedBy("سیستم مدیریت پرسنل")
+            ->setTitle("گزارش سازمانی پرسنل")
+            ->setSubject("گزارش سازمانی")
+            ->setDescription("گزارش خروجی سازمانی پرسنل")
+            ->setKeywords("پرسنل گزارش سازمانی اکسل")
+            ->setCategory("گزارش");
+        
+        // ایجاد چندین شیت
+        $objPHPExcel->createSheet();
+        $objPHPExcel->createSheet();
+        
+        // شیت ۱: گزارش تجمیعی
+        $objPHPExcel->setActiveSheetIndex(0);
+        $summary_sheet = $objPHPExcel->getActiveSheet();
+        $summary_sheet->setTitle('گزارش تجمیعی');
+        $summary_sheet->setRightToLeft(true);
+        
+        // شیت ۲: جزئیات پرسنل
+        $objPHPExcel->setActiveSheetIndex(1);
+        $details_sheet = $objPHPExcel->getActiveSheet();
+        $details_sheet->setTitle('جزئیات پرسنل');
+        $details_sheet->setRightToLeft(true);
+        
+        // شیت ۳: آمار ادارات
+        $objPHPExcel->setActiveSheetIndex(2);
+        $stats_sheet = $objPHPExcel->getActiveSheet();
+        $stats_sheet->setTitle('آمار ادارات');
+        $stats_sheet->setRightToLeft(true);
+        
+        // ========== شیت گزارش تجمیعی ==========
+        $summary_data = $this->get_org_summary_data($department_id, $status, $search);
+        
+        $summary_headers = ['ردیف', 'نام اداره', 'مدیر اداره', 'تعداد پرسنل', 'پرسنل فعال', 'پرسنل غیرفعال', 
+                           'درصد تکمیل اطلاعات', 'میانگین سابقه کار', 'آخرین به‌روزرسانی'];
+        
+        // نوشتن هدر شیت تجمیعی
+        $col = 0;
+        foreach ($summary_headers as $header) {
+            $cell = PHPExcel_Cell::stringFromColumnIndex($col) . '1';
+            $summary_sheet->setCellValue($cell, $header);
+            $this->apply_header_style($summary_sheet, $cell);
+            $col++;
+        }
+        
+        // نوشتن داده‌های تجمیعی
+        $row = 2;
+        foreach ($summary_data as $index => $dept) {
+            $col = 0;
+            
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $index + 1);
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['name']);
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['manager']);
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['total_personnel']);
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['active_personnel']);
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['inactive_personnel']);
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['completion_rate'] . '%');
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['avg_experience']);
+            $summary_sheet->setCellValueByColumnAndIndex($col++, $row, $dept['last_update']);
+            
+            $this->apply_data_row_style($summary_sheet, $row, $col, $index + 1);
+            $row++;
+        }
+        
+        // ========== شیت جزئیات پرسنل ==========
+        $details_data = $this->get_org_details_data($department_id, $status, $search);
+        
+        $details_headers = ['ردیف', 'نام اداره', 'کدملی', 'نام', 'نام خانوادگی', 'تاریخ استخدام', 
+                           'نوع استخدام', 'وضعیت', 'سن', 'سابقه کار', 'آخرین ویرایش'];
+        
+        // اضافه کردن فیلدهای مهم
+        $important_fields = $this->get_important_fields();
+        foreach ($important_fields as $field) {
+            $details_headers[] = $field->field_label;
+        }
+        
+        // نوشتن هدر شیت جزئیات
+        $col = 0;
+        foreach ($details_headers as $header) {
+            $cell = PHPExcel_Cell::stringFromColumnIndex($col) . '1';
+            $details_sheet->setCellValue($cell, $header);
+            $this->apply_header_style($details_sheet, $cell);
+            $col++;
+        }
+        
+        // نوشتن داده‌های جزئیات
+        $row = 2;
+        foreach ($details_data as $index => $person) {
+            $col = 0;
+            
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $index + 1);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['department_name']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['national_code']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['first_name']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['last_name']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['employment_date']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['employment_type']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['status']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['age']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['experience']);
+            $details_sheet->setCellValueByColumnAndIndex($col++, $row, $person['last_edit']);
+            
+            // فیلدهای مهم
+            foreach ($important_fields as $field) {
+                $value = $person['meta'][$field->id] ?? $person['meta'][$field->field_name] ?? '';
+                $details_sheet->setCellValueByColumnAndIndex($col++, $row, $value);
             }
-            fputcsv($fp, $csv_row);
+            
+            $this->apply_data_row_style($details_sheet, $row, $col, $index + 1);
+            $row++;
         }
         
-        fclose($fp);
+        // ========== شیت آمار ادارات ==========
+        $stats_data = $this->get_department_stats_data();
+        
+        $stats_headers = ['ردیف', 'نام اداره', 'رنگ', 'تعداد پرسنل', 'توزیع وضعیت', 'توزیع نوع استخدام', 
+                         'میانگین سن', 'میانگین سابقه', 'فیلدهای تکمیل شده', 'فیلدهای ناقص'];
+        
+        // نوشتن هدر شیت آمار
+        $col = 0;
+        foreach ($stats_headers as $header) {
+            $cell = PHPExcel_Cell::stringFromColumnIndex($col) . '1';
+            $stats_sheet->setCellValue($cell, $header);
+            $this->apply_header_style($stats_sheet, $cell);
+            $col++;
+        }
+        
+        // نوشتن داده‌های آمار
+        $row = 2;
+        foreach ($stats_data as $index => $stat) {
+            $col = 0;
+            
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $index + 1);
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['name']);
+            
+            // سلول رنگ
+            $color_cell = PHPExcel_Cell::stringFromColumnIndex($col) . $row;
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, '');
+            $color_style = $stats_sheet->getStyle($color_cell);
+            $color_style->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+            $color_style->getFill()->getStartColor()->setRGB(ltrim($stat['color'], '#'));
+            
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['total_personnel']);
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['status_distribution']);
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['employment_distribution']);
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['avg_age']);
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['avg_experience']);
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['completed_fields']);
+            $stats_sheet->setCellValueByColumnAndIndex($col++, $row, $stat['incomplete_fields']);
+            
+            $this->apply_data_row_style($stats_sheet, $row, $col, $index + 1);
+            $row++;
+        }
+        
+        // تنظیم عرض ستون‌ها در همه شیت‌ها
+        foreach ($objPHPExcel->getAllSheets() as $sheet) {
+            foreach (range('A', $sheet->getHighestDataColumn()) as $columnID) {
+                $sheet->getColumnDimension($columnID)->setAutoSize(true);
+            }
+            $sheet->freezePane('A2');
+        }
+        
+        // بازگشت به شیت اول
+        $objPHPExcel->setActiveSheetIndex(0);
+        
+        // هدر برای دانلود
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment;filename="گزارش_سازمانی_' . date('Y-m-d_H-i') . '.xlsx"');
+        header('Cache-Control: max-age=0');
+        
+        // ایجاد Writer و خروجی
+        $objWriter = PHPExcel_IOFactory::createWriter($objPHPExcel, 'Excel2007');
+        $objWriter->save('php://output');
+        
+        exit;
     }
     
     /**
-     * تبدیل شماره ستون به حرف
+     * گرفتن قالب اکسل
      */
-    private function get_column_letter($col_index) {
-        if (class_exists('PHPExcel_Cell') && !$this->use_html_excel) {
-            return PHPExcel_Cell::stringFromColumnIndex($col_index);
+    private function get_excel_template() {
+        global $wpdb;
+        $table_name = $wpdb->prefix . WF_TABLE_PREFIX . 'excel_templates';
+        
+        $template = $wpdb->get_row("SELECT * FROM $table_name WHERE is_default = 1 LIMIT 1");
+        
+        if (!$template) {
+            // ایجاد یک قالب پیش‌فرض
+            $template = (object) [
+                'header_color' => '#2c3e50',
+                'text_color' => '#333333',
+                'even_row_color' => '#f8f9fa',
+                'odd_row_color' => '#ffffff',
+                'border_style' => 'thin',
+                'border_color' => '#dddddd',
+                'header_font_size' => 12,
+                'data_font_size' => 11
+            ];
         }
         
-        // تبدیل ساده
-        $letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        $result = '';
+        return $template;
+    }
+    
+    /**
+     * اعمال استایل به هدر
+     */
+    private function apply_header_style($sheet, $cell) {
+        $style = $sheet->getStyle($cell);
+        $style->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+        $style->getFill()->getStartColor()->setRGB(ltrim($this->template->header_color, '#'));
+        $style->getFont()->setBold(true);
+        $style->getFont()->setSize($this->template->header_font_size);
+        $style->getFont()->getColor()->setRGB('FFFFFF');
+        $style->getAlignment()->setHorizontal(PHPExcel_Style_Alignment::HORIZONTAL_CENTER);
+        $style->getAlignment()->setVertical(PHPExcel_Style_Alignment::VERTICAL_CENTER);
         
-        while ($col_index >= 0) {
-            $result = $letters[$col_index % 26] . $result;
-            $col_index = floor($col_index / 26) - 1;
+        // تنظیم ارتفاع سطر
+        $row = PHPExcel_Cell::coordinateFromString($cell)[1];
+        $sheet->getRowDimension($row)->setRowHeight(30);
+    }
+    
+    /**
+     * اعمال استایل به سطر داده
+     */
+    private function apply_data_row_style($sheet, $row, $col_count, $row_index) {
+        $start_col = 'A';
+        $end_col = PHPExcel_Cell::stringFromColumnIndex($col_count - 1);
+        
+        $style = $sheet->getStyle("{$start_col}{$row}:{$end_col}{$row}");
+        
+        // رنگ‌بندی ردیف‌های زوج و فرد
+        $row_color = $row_index % 2 == 0 ? $this->template->even_row_color : $this->template->odd_row_color;
+        $style->getFill()->setFillType(PHPExcel_Style_Fill::FILL_SOLID);
+        $style->getFill()->getStartColor()->setRGB(ltrim($row_color, '#'));
+        
+        // فونت
+        $style->getFont()->setSize($this->template->data_font_size);
+        $style->getFont()->getColor()->setRGB(ltrim($this->template->text_color, '#'));
+        
+        // تراز
+        $style->getAlignment()->setHorizontal(PHPExcel_Style_Alignment::HORIZONTAL_CENTER);
+        $style->getAlignment()->setVertical(PHPExcel_Style_Alignment::VERTICAL_CENTER);
+        
+        // border
+        $border_style = $this->get_border_style($this->template->border_style);
+        $style->getBorders()->getAllBorders()->setBorderStyle($border_style);
+        $style->getBorders()->getAllBorders()->getColor()->setRGB(ltrim($this->template->border_color, '#'));
+    }
+    
+    /**
+     * تبدیل استایل border
+     */
+    private function get_border_style($style_name) {
+        $styles = [
+            'thin' => PHPExcel_Style_Border::BORDER_THIN,
+            'medium' => PHPExcel_Style_Border::BORDER_MEDIUM,
+            'thick' => PHPExcel_Style_Border::BORDER_THICK,
+            'dotted' => PHPExcel_Style_Border::BORDER_DOTTED,
+            'dashed' => PHPExcel_Style_Border::BORDER_DASHED
+        ];
+        
+        return $styles[$style_name] ?? PHPExcel_Style_Border::BORDER_THIN;
+    }
+    
+    /**
+     * گرفتن داده‌های خروجی برای مدیر اداره
+     */
+    private function get_export_data($department_id, $period_id = null, $filters = [], $search = '') {
+        global $wpdb;
+        
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        $departments_table = $wpdb->prefix . WF_TABLE_PREFIX . 'departments';
+        $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+        
+        // ساختن کوئری
+        $query = "SELECT p.*, d.name as department_name 
+                  FROM $personnel_table p 
+                  INNER JOIN $departments_table d ON p.department_id = d.id 
+                  WHERE p.department_id = %d AND p.is_deleted = 0";
+        
+        $params = [$department_id];
+        
+        // اعمال فیلترها
+        if (!empty($filters)) {
+            foreach ($filters as $field_id => $values) {
+                if ($field_id === 'status') {
+                    $query .= " AND p.status = %s";
+                    $params[] = $values;
+                } elseif ($field_id === 'employment_type') {
+                    $query .= " AND p.employment_type = %s";
+                    $params[] = $values;
+                }
+            }
+        }
+        
+        // اعمال جستجو
+        if (!empty($search)) {
+            $query .= " AND (p.first_name LIKE %s OR p.last_name LIKE %s OR p.national_code LIKE %s)";
+            $search_term = '%' . $wpdb->esc_like($search) . '%';
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
+        }
+        
+        $query .= " ORDER BY p.last_name ASC, p.first_name ASC";
+        
+        $personnel = $wpdb->get_results($wpdb->prepare($query, $params));
+        
+        // اضافه کردن داده‌های متا
+        $fields = workforce_get_all_fields();
+        $result = [];
+        
+        foreach ($personnel as $person) {
+            $item = [
+                'national_code' => $person->national_code,
+                'first_name' => $person->first_name,
+                'last_name' => $person->last_name,
+                'department_name' => $person->department_name,
+                'employment_date' => $person->employment_date,
+                'employment_type' => $this->get_employment_type_label($person->employment_type),
+                'status' => $this->get_status_label($person->status),
+                'meta' => []
+            ];
+            
+            // گرفتن داده‌های متا
+            foreach ($fields as $field) {
+                if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                    $value = workforce_get_personnel_field_value($person->id, $field->field_name, $period_id);
+                    $item['meta'][$field->id] = $value;
+                    $item['meta'][$field->field_name] = $value;
+                }
+            }
+            
+            $result[] = $item;
         }
         
         return $result;
     }
-}
-
-// ==================== توابع اصلی ====================
-
-/**
- * ایجاد گزارش اکسل
- */
-function wf_generate_excel_report($data, $fields, $template_id = null, $options = array()) {
-    try {
-        $exporter = new WF_Excel_Exporter_Standalone($template_id);
+    
+    /**
+     * برچسب نوع استخدام
+     */
+    private function get_employment_type_label($type) {
+        $labels = [
+            'permanent' => 'دائمی',
+            'contract' => 'پیمانی',
+            'temporary' => 'موقت',
+            'project' => 'پروژه‌ای'
+        ];
         
-        $exporter->set_fields($fields)
-                 ->set_data($data);
-        
-        $filename = isset($options['filename']) ? $options['filename'] : 'گزارش_پرسنل';
-        
-        return $exporter->generate($filename, $options);
-        
-    } catch (Exception $e) {
-        // اگر خطا داد، فایل HTML ایجاد کن
-        return array(
-            'success' => false,
-            'error' => $e->getMessage(),
-            'alternative' => wf_generate_html_report($data, $fields, $options)
-        );
+        return $labels[$type] ?? $type;
     }
-}
-
-/**
- * ایجاد گزارش HTML
- */
-function wf_generate_html_report($data, $fields, $options = array()) {
-    $filename = isset($options['filename']) ? $options['filename'] : 'گزارش_پرسنل';
-    $filename = sanitize_file_name($filename . '_' . date('Y-m-d_H-i-s') . '.html');
-    $filepath = WP_CONTENT_DIR . '/uploads/workforce_exports/' . $filename;
     
-    wp_mkdir_p(dirname($filepath));
+    /**
+     * برچسب وضعیت
+     */
+    private function get_status_label($status) {
+        $labels = [
+            'active' => 'فعال',
+            'inactive' => 'غیرفعال',
+            'suspended' => 'تعلیق',
+            'retired' => 'بازنشسته'
+        ];
+        
+        return $labels[$status] ?? $status;
+    }
     
-    $html = '<!DOCTYPE html>
-    <html dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>گزارش پرسنل</title>
-        <style>
-            body { font-family: Tahoma, sans-serif; margin: 20px; }
-            table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-            th { background-color: #2E86C1; color: white; padding: 12px; text-align: center; border: 1px solid #1B4F72; }
-            td { padding: 10px; border: 1px solid #ddd; text-align: right; }
-            tr:nth-child(even) { background-color: #f2f3f4; }
-            .header { background: #2E86C1; color: white; padding: 20px; text-align: center; margin-bottom: 20px; }
-            .footer { margin-top: 30px; text-align: center; color: #7f8c8d; font-size: 12px; }
-        </style>
-    </head>
-    <body>';
+    /**
+     * گرفتن داده‌های تجمیعی برای مدیر سازمان
+     */
+    private function get_org_summary_data($department_id = null, $status = '', $search = '') {
+        global $wpdb;
+        
+        $departments_table = $wpdb->prefix . WF_TABLE_PREFIX . 'departments';
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        $users_table = $wpdb->users;
+        
+        $query = "SELECT d.id, d.name, d.color, d.manager_id, u.display_name as manager_name,
+                         COUNT(p.id) as total_personnel,
+                         SUM(CASE WHEN p.status = 'active' THEN 1 ELSE 0 END) as active_personnel,
+                         SUM(CASE WHEN p.status != 'active' THEN 1 ELSE 0 END) as inactive_personnel,
+                         MAX(p.updated_at) as last_update
+                  FROM $departments_table d
+                  LEFT JOIN $personnel_table p ON d.id = p.department_id AND p.is_deleted = 0
+                  LEFT JOIN $users_table u ON d.manager_id = u.ID
+                  WHERE d.is_active = 1";
+        
+        $params = [];
+        
+        if ($department_id) {
+            $query .= " AND d.id = %d";
+            $params[] = $department_id;
+        }
+        
+        $query .= " GROUP BY d.id, d.name, d.color, d.manager_id, u.display_name
+                    ORDER BY d.name ASC";
+        
+        $departments = $wpdb->get_results($wpdb->prepare($query, $params));
+        
+        $result = [];
+        foreach ($departments as $dept) {
+            // محاسبه درصد تکمیل اطلاعات
+            $completion_rate = $this->calculate_completion_rate($dept->id);
+            
+            // محاسبه میانگین سابقه کار
+            $avg_experience = $this->calculate_avg_experience($dept->id);
+            
+            $result[] = [
+                'id' => $dept->id,
+                'name' => $dept->name,
+                'color' => $dept->color,
+                'manager' => $dept->manager_name ?: 'تعیین نشده',
+                'total_personnel' => $dept->total_personnel,
+                'active_personnel' => $dept->active_personnel,
+                'inactive_personnel' => $dept->inactive_personnel,
+                'completion_rate' => $completion_rate,
+                'avg_experience' => $avg_experience,
+                'last_update' => $dept->last_update ? wp_date('Y/m/d H:i', strtotime($dept->last_update)) : 'ندارد'
+            ];
+        }
+        
+        return $result;
+    }
     
-    $html .= '<div class="header">
-        <h1>گزارش کارکرد پرسنل</h1>
-        <p>تاریخ تولید: ' . wf_current_jalali_date('Y/m/d H:i') . '</p>
-    </div>';
+    /**
+     * محاسبه درصد تکمیل اطلاعات اداره
+     */
+    private function calculate_completion_rate($department_id) {
+        global $wpdb;
+        
+        $fields_table = $wpdb->prefix . WF_TABLE_PREFIX . 'fields';
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+        
+        // تعداد فیلدهای ضروری
+        $required_fields = $wpdb->get_results(
+            "SELECT id, field_name FROM $fields_table WHERE is_required = 1"
+        );
+        
+        if (empty($required_fields)) {
+            return 100;
+        }
+        
+        // تعداد پرسنل
+        $total_personnel = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $personnel_table WHERE department_id = %d AND is_deleted = 0",
+            $department_id
+        ));
+        
+        if ($total_personnel == 0) {
+            return 100;
+        }
+        
+        $total_required = count($required_fields) * $total_personnel;
+        $completed_count = 0;
+        
+        foreach ($required_fields as $field) {
+            $completed = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(DISTINCT pm.personnel_id) 
+                 FROM $meta_table pm 
+                 INNER JOIN $personnel_table p ON pm.personnel_id = p.id 
+                 WHERE p.department_id = %d AND p.is_deleted = 0 
+                 AND pm.meta_key = %s AND pm.meta_value != ''",
+                $department_id, $field->field_name
+            ));
+            $completed_count += $completed;
+        }
+        
+        return $total_required > 0 ? round(($completed_count / $total_required) * 100, 2) : 100;
+    }
     
-    if (!empty($fields) && !empty($data)) {
-        $html .= '<table>';
+    /**
+     * محاسبه میانگین سابقه کار اداره
+     */
+    private function calculate_avg_experience($department_id) {
+        global $wpdb;
+        
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        
+        $employment_dates = $wpdb->get_col($wpdb->prepare(
+            "SELECT employment_date FROM $personnel_table 
+             WHERE department_id = %d AND is_deleted = 0 AND employment_date IS NOT NULL AND employment_date != ''",
+            $department_id
+        ));
+        
+        if (empty($employment_dates)) {
+            return 'ندارد';
+        }
+        
+        $total_experience = 0;
+        $count = 0;
+        
+        foreach ($employment_dates as $date) {
+            if (preg_match('/^(\d{4})\/(\d{2})\/(\d{2})$/', $date, $matches)) {
+                list($gy, $gm, $gd) = workforce_jalali_to_gregorian(
+                    (int) $matches[1],
+                    (int) $matches[2],
+                    (int) $matches[3]
+                );
+                
+                $employment_timestamp = mktime(0, 0, 0, $gm, $gd, $gy);
+                $current_timestamp = current_time('timestamp');
+                
+                $experience = date('Y', $current_timestamp) - date('Y', $employment_timestamp);
+                
+                if (date('md', $current_timestamp) < date('md', $employment_timestamp)) {
+                    $experience--;
+                }
+                
+                $total_experience += max(0, $experience);
+                $count++;
+            }
+        }
+        
+        if ($count == 0) {
+            return 'ندارد';
+        }
+        
+        $avg_experience = round($total_experience / $count, 1);
+        return $avg_experience . ' سال';
+    }
+    
+    /**
+     * گرفتن داده‌های جزئیات برای مدیر سازمان
+     */
+    private function get_org_details_data($department_id = null, $status = '', $search = '') {
+        global $wpdb;
+        
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        $departments_table = $wpdb->prefix . WF_TABLE_PREFIX . 'departments';
+        $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+        
+        $query = "SELECT p.*, d.name as department_name, d.color as department_color 
+                  FROM $personnel_table p 
+                  INNER JOIN $departments_table d ON p.department_id = d.id 
+                  WHERE p.is_deleted = 0";
+        
+        $params = [];
+        
+        if ($department_id) {
+            $query .= " AND p.department_id = %d";
+            $params[] = $department_id;
+        }
+        
+        if ($status) {
+            $query .= " AND p.status = %s";
+            $params[] = $status;
+        }
+        
+        if ($search) {
+            $query .= " AND (p.first_name LIKE %s OR p.last_name LIKE %s OR p.national_code LIKE %s OR d.name LIKE %s)";
+            $search_term = '%' . $wpdb->esc_like($search) . '%';
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
+        }
+        
+        $query .= " ORDER BY d.name ASC, p.last_name ASC, p.first_name ASC";
+        
+        $personnel = $wpdb->get_results($wpdb->prepare($query, $params));
+        
+        $important_fields = $this->get_important_fields();
+        $result = [];
+        
+        foreach ($personnel as $person) {
+            // محاسبه سن
+            $age = $this->calculate_age($person->birth_date);
+            
+            // محاسبه سابقه کار
+            $experience = $this->calculate_experience($person->employment_date);
+            
+            $item = [
+                'id' => $person->id,
+                'department_name' => $person->department_name,
+                'national_code' => $person->national_code,
+                'first_name' => $person->first_name,
+                'last_name' => $person->last_name,
+                'employment_date' => $person->employment_date,
+                'employment_type' => $this->get_employment_type_label($person->employment_type),
+                'status' => $this->get_status_label($person->status),
+                'age' => $age ? $age . ' سال' : 'نامشخص',
+                'experience' => $experience ? $experience . ' سال' : 'نامشخص',
+                'last_edit' => $person->updated_at ? wp_date('Y/m/d H:i', strtotime($person->updated_at)) : 'ندارد',
+                'meta' => []
+            ];
+            
+            // گرفتن فیلدهای مهم
+            foreach ($important_fields as $field) {
+                $value = workforce_get_personnel_field_value($person->id, $field->field_name);
+                $item['meta'][$field->id] = $value;
+                $item['meta'][$field->field_name] = $value;
+            }
+            
+            $result[] = $item;
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * محاسبه سن از تاریخ تولد
+     */
+    private function calculate_age($birth_date) {
+        if (!$birth_date) {
+            return null;
+        }
+        
+        if (!preg_match('/^(\d{4})\/(\d{2})\/(\d{2})$/', $birth_date, $matches)) {
+            return null;
+        }
+        
+        list($gy, $gm, $gd) = workforce_jalali_to_gregorian(
+            (int) $matches[1],
+            (int) $matches[2],
+            (int) $matches[3]
+        );
+        
+        $birth_timestamp = mktime(0, 0, 0, $gm, $gd, $gy);
+        $current_timestamp = current_time('timestamp');
+        
+        $age = date('Y', $current_timestamp) - date('Y', $birth_timestamp);
+        
+        if (date('md', $current_timestamp) < date('md', $birth_timestamp)) {
+            $age--;
+        }
+        
+        return $age;
+    }
+    
+    /**
+     * محاسبه سابقه کار از تاریخ استخدام
+     */
+    private function calculate_experience($employment_date) {
+        if (!$employment_date) {
+            return null;
+        }
+        
+        if (!preg_match('/^(\d{4})\/(\d{2})\/(\d{2})$/', $employment_date, $matches)) {
+            return null;
+        }
+        
+        list($gy, $gm, $gd) = workforce_jalali_to_gregorian(
+            (int) $matches[1],
+            (int) $matches[2],
+            (int) $matches[3]
+        );
+        
+        $employment_timestamp = mktime(0, 0, 0, $gm, $gd, $gy);
+        $current_timestamp = current_time('timestamp');
+        
+        $experience = date('Y', $current_timestamp) - date('Y', $employment_timestamp);
+        
+        if (date('md', $current_timestamp) < date('md', $employment_timestamp)) {
+            $experience--;
+        }
+        
+        return max(0, $experience);
+    }
+    
+    /**
+     * گرفتن فیلدهای مهم برای گزارش
+     */
+    private function get_important_fields() {
+        $all_fields = workforce_get_all_fields();
+        $important_fields = [];
+        
+        // فیلدهای مانیتورینگ و ضروری در اولویت هستند
+        foreach ($all_fields as $field) {
+            if ($field->is_monitoring || $field->is_required) {
+                if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                    $important_fields[] = $field;
+                }
+            }
+        }
+        
+        // اگر کمتر از ۵ فیلد مهم داریم، بقیه فیلدها را اضافه کن
+        if (count($important_fields) < 5) {
+            foreach ($all_fields as $field) {
+                if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                    $already_exists = false;
+                    foreach ($important_fields as $imp_field) {
+                        if ($imp_field->id == $field->id) {
+                            $already_exists = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!$already_exists && count($important_fields) < 10) {
+                        $important_fields[] = $field;
+                    }
+                }
+            }
+        }
+        
+        return $important_fields;
+    }
+    
+    /**
+     * گرفتن داده‌های آمار ادارات
+     */
+    private function get_department_stats_data() {
+        global $wpdb;
+        
+        $departments_table = $wpdb->prefix . WF_TABLE_PREFIX . 'departments';
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        
+        $query = "SELECT d.id, d.name, d.color,
+                         COUNT(p.id) as total_personnel,
+                         GROUP_CONCAT(DISTINCT p.status) as statuses,
+                         GROUP_CONCAT(DISTINCT p.employment_type) as employment_types
+                  FROM $departments_table d
+                  LEFT JOIN $personnel_table p ON d.id = p.department_id AND p.is_deleted = 0
+                  WHERE d.is_active = 1
+                  GROUP BY d.id, d.name, d.color
+                  ORDER BY d.name ASC";
+        
+        $departments = $wpdb->get_results($query);
+        
+        $result = [];
+        foreach ($departments as $dept) {
+            // توزیع وضعیت
+            $status_distribution = $this->get_status_distribution($dept->id);
+            
+            // توزیع نوع استخدام
+            $employment_distribution = $this->get_employment_distribution($dept->id);
+            
+            // میانگین سن
+            $avg_age = $this->calculate_dept_avg_age($dept->id);
+            
+            // میانگین سابقه کار
+            $avg_experience = $this->calculate_dept_avg_experience($dept->id);
+            
+            // فیلدهای تکمیل شده و ناقص
+            $field_stats = $this->get_dept_field_stats($dept->id);
+            
+            $result[] = [
+                'id' => $dept->id,
+                'name' => $dept->name,
+                'color' => $dept->color,
+                'total_personnel' => $dept->total_personnel,
+                'status_distribution' => $status_distribution,
+                'employment_distribution' => $employment_distribution,
+                'avg_age' => $avg_age,
+                'avg_experience' => $avg_experience,
+                'completed_fields' => $field_stats['completed'],
+                'incomplete_fields' => $field_stats['incomplete']
+            ];
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * گرفتن توزیع وضعیت پرسنل اداره
+     */
+    private function get_status_distribution($department_id) {
+        global $wpdb;
+        
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        
+        $statuses = $wpdb->get_results($wpdb->prepare(
+            "SELECT status, COUNT(*) as count 
+             FROM $personnel_table 
+             WHERE department_id = %d AND is_deleted = 0 
+             GROUP BY status 
+             ORDER BY count DESC",
+            $department_id
+        ));
+        
+        $distribution = [];
+        foreach ($statuses as $status) {
+            $label = $this->get_status_label($status->status);
+            $distribution[] = $label . ': ' . $status->count;
+        }
+        
+        return implode(' | ', $distribution);
+    }
+    
+    /**
+     * گرفتن توزیع نوع استخدام اداره
+     */
+    private function get_employment_distribution($department_id) {
+        global $wpdb;
+        
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        
+        $types = $wpdb->get_results($wpdb->prepare(
+            "SELECT employment_type, COUNT(*) as count 
+             FROM $personnel_table 
+             WHERE department_id = %d AND is_deleted = 0 
+             GROUP BY employment_type 
+             ORDER BY count DESC",
+            $department_id
+        ));
+        
+        $distribution = [];
+        foreach ($types as $type) {
+            $label = $this->get_employment_type_label($type->employment_type);
+            $distribution[] = $label . ': ' . $type->count;
+        }
+        
+        return implode(' | ', $distribution);
+    }
+    
+    /**
+     * محاسبه میانگین سن اداره
+     */
+    private function calculate_dept_avg_age($department_id) {
+        global $wpdb;
+        
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+        
+        // گرفتن تاریخ تولد همه پرسنل
+        $birth_dates = $wpdb->get_col($wpdb->prepare(
+            "SELECT pm.meta_value 
+             FROM $meta_table pm 
+             INNER JOIN $personnel_table p ON pm.personnel_id = p.id 
+             WHERE p.department_id = %d AND p.is_deleted = 0 
+             AND pm.meta_key = 'birth_date' AND pm.meta_value != ''",
+            $department_id
+        ));
+        
+        if (empty($birth_dates)) {
+            return 'ندارد';
+        }
+        
+        $total_age = 0;
+        $count = 0;
+        
+        foreach ($birth_dates as $birth_date) {
+            $age = $this->calculate_age($birth_date);
+            if ($age !== null) {
+                $total_age += $age;
+                $count++;
+            }
+        }
+        
+        if ($count == 0) {
+            return 'ندارد';
+        }
+        
+        $avg_age = round($total_age / $count, 1);
+        return $avg_age . ' سال';
+    }
+    
+    /**
+     * محاسبه میانگین سابقه کار اداره
+     */
+    private function calculate_dept_avg_experience($department_id) {
+        global $wpdb;
+        
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        
+        $employment_dates = $wpdb->get_col($wpdb->prepare(
+            "SELECT employment_date 
+             FROM $personnel_table 
+             WHERE department_id = %d AND is_deleted = 0 
+             AND employment_date IS NOT NULL AND employment_date != ''",
+            $department_id
+        ));
+        
+        if (empty($employment_dates)) {
+            return 'ندارد';
+        }
+        
+        $total_experience = 0;
+        $count = 0;
+        
+        foreach ($employment_dates as $date) {
+            $experience = $this->calculate_experience($date);
+            if ($experience !== null) {
+                $total_experience += $experience;
+                $count++;
+            }
+        }
+        
+        if ($count == 0) {
+            return 'ندارد';
+        }
+        
+        $avg_experience = round($total_experience / $count, 1);
+        return $avg_experience . ' سال';
+    }
+    
+    /**
+     * گرفتن آمار فیلدهای اداره
+     */
+    private function get_dept_field_stats($department_id) {
+        global $wpdb;
+        
+        $fields_table = $wpdb->prefix . WF_TABLE_PREFIX . 'fields';
+        $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+        $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+        
+        // تعداد فیلدها
+        $total_fields = $wpdb->get_var("SELECT COUNT(*) FROM $fields_table");
+        
+        // تعداد پرسنل
+        $total_personnel = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $personnel_table WHERE department_id = %d AND is_deleted = 0",
+            $department_id
+        ));
+        
+        $total_possible = $total_fields * $total_personnel;
+        
+        // تعداد فیلدهای پر شده
+        $completed = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) 
+             FROM $meta_table pm 
+             INNER JOIN $personnel_table p ON pm.personnel_id = p.id 
+             WHERE p.department_id = %d AND p.is_deleted = 0 
+             AND pm.meta_value != ''",
+            $department_id
+        ));
+        
+        $incomplete = $total_possible - $completed;
+        
+        return [
+            'completed' => $completed,
+            'incomplete' => $incomplete
+        ];
+    }
+    
+    /**
+     * جایگزین CSV برای وقتی که PHPExcel وجود ندارد
+     */
+    private function export_csv_fallback($department_id, $period_id, $filters, $search) {
+        $data = $this->get_export_data($department_id, $period_id, $filters, $search);
+        
+        // هدر برای دانلود CSV
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment;filename="گزارش_پرسنل_' . date('Y-m-d_H-i') . '.csv"');
+        header('Cache-Control: max-age=0');
+        
+        // ایجاد خروجی
+        $output = fopen('php://output', 'w');
+        
+        // نوشتن BOM برای UTF-8
+        fputs($output, $bom = (chr(0xEF) . chr(0xBB) . chr(0xBF)));
+        
+        // نوشتن هدر
+        $headers = ['ردیف', 'کدملی', 'نام', 'نام خانوادگی', 'نام اداره', 'تاریخ استخدام', 'نوع استخدام', 'وضعیت'];
+        
+        $fields = workforce_get_all_fields();
+        foreach ($fields as $field) {
+            if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                $headers[] = $field->field_label;
+            }
+        }
+        
+        fputcsv($output, $headers);
+        
+        // نوشتن داده‌ها
+        foreach ($data as $index => $item) {
+            $row = [
+                $index + 1,
+                $item['national_code'],
+                $item['first_name'],
+                $item['last_name'],
+                $item['department_name'],
+                $item['employment_date'],
+                $item['employment_type'],
+                $item['status']
+            ];
+            
+            foreach ($fields as $field) {
+                if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                    $value = $item['meta'][$field->id] ?? $item['meta'][$field->field_name] ?? '';
+                    $row[] = $value;
+                }
+            }
+            
+            fputcsv($output, $row);
+        }
+        
+        fclose($output);
+        exit;
+    }
+    
+    /**
+     * جایگزین CSV برای گزارش سازمانی
+     */
+    private function export_org_csv_fallback($department_id, $status, $search) {
+        $data = $this->get_org_details_data($department_id, $status, $search);
+        
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment;filename="گزارش_سازمانی_' . date('Y-m-d_H-i') . '.csv"');
+        header('Cache-Control: max-age=0');
+        
+        $output = fopen('php://output', 'w');
+        fputs($output, $bom = (chr(0xEF) . chr(0xBB) . chr(0xBF)));
         
         // هدر
-        $html .= '<thead><tr>';
-        foreach ($fields as $field) {
-            $html .= '<th>' . esc_html($field['field_name']) . '</th>';
+        $headers = ['ردیف', 'نام اداره', 'کدملی', 'نام', 'نام خانوادگی', 'تاریخ استخدام', 
+                   'نوع استخدام', 'وضعیت', 'سن', 'سابقه کار', 'آخرین ویرایش'];
+        
+        $important_fields = $this->get_important_fields();
+        foreach ($important_fields as $field) {
+            $headers[] = $field->field_label;
         }
-        $html .= '</tr></thead>';
+        
+        fputcsv($output, $headers);
         
         // داده‌ها
-        $html .= '<tbody>';
-        foreach ($data as $row) {
-            $html .= '<tr>';
-            foreach ($fields as $field) {
-                $value = '';
-                if (isset($row['data'][$field['field_key']])) {
-                    $value = $row['data'][$field['field_key']];
-                }
-                $html .= '<td>' . esc_html($value) . '</td>';
-            }
-            $html .= '</tr>';
-        }
-        $html .= '</tbody></table>';
-    }
-    
-    $html .= '<div class="footer">
-        <p>تولید شده توسط سیستم مدیریت کارکرد پرسنل بنی اسد</p>
-    </div>';
-    
-    $html .= '</body></html>';
-    
-    file_put_contents($filepath, $html);
-    
-    return array(
-        'success' => true,
-        'filename' => $filename,
-        'filepath' => $filepath,
-        'url' => content_url('/uploads/workforce_exports/' . $filename)
-    );
-}
-
-/**
- * AJAX ایجاد گزارش
- */
-add_action('wp_ajax_wf_export_excel_simple', 'wf_ajax_export_excel_simple');
-
-function wf_ajax_export_excel_simple() {
-    check_ajax_referer('workforce_manager_nonce', 'nonce');
-    
-    $export_type = sanitize_text_field($_POST['export_type']);
-    $manager_id = intval($_POST['manager_id']);
-    $filters = isset($_POST['filters']) ? json_decode(stripslashes($_POST['filters']), true) : array();
-    $selected_ids = isset($_POST['selected_ids']) ? array_map('intval', $_POST['selected_ids']) : array();
-    
-    // بررسی دسترسی
-    $user = get_user_by('id', $manager_id);
-    if (!$user) {
-        wp_send_json_error(array('message' => 'کاربر معتبر نیست'));
-    }
-    
-    // شبیه‌سازی داده‌ها برای تست
-    $fields = array(
-        array('field_key' => 'national_code', 'field_name' => 'کد ملی', 'field_type' => 'text'),
-        array('field_key' => 'first_name', 'field_name' => 'نام', 'field_type' => 'text'),
-        array('field_key' => 'last_name', 'field_name' => 'نام خانوادگی', 'field_type' => 'text'),
-        array('field_key' => 'birth_date', 'field_name' => 'تاریخ تولد', 'field_type' => 'date'),
-        array('field_key' => 'employment_date', 'field_name' => 'تاریخ استخدام', 'field_type' => 'date'),
-        array('field_key' => 'salary', 'field_name' => 'حقوق', 'field_type' => 'number'),
-        array('field_key' => 'is_active', 'field_name' => 'وضعیت فعال', 'field_type' => 'checkbox')
-    );
-    
-    $data = array();
-    for ($i = 1; $i <= 50; $i++) {
-        $data[] = array(
-            'id' => $i,
-            'data' => array(
-                'national_code' => str_pad($i, 10, '0', STR_PAD_LEFT),
-                'first_name' => 'نام' . $i,
-                'last_name' => 'خانوادگی' . $i,
-                'birth_date' => '1360-01-' . str_pad($i, 2, '0', STR_PAD_LEFT),
-                'employment_date' => '1390-01-' . str_pad($i, 2, '0', STR_PAD_LEFT),
-                'salary' => rand(5000000, 15000000),
-                'is_active' => rand(0, 1)
-            )
-        );
-    }
-    
-    // اعمال فیلترها
-    if (!empty($filters)) {
-        $filtered_data = array();
-        foreach ($data as $row) {
-            $include = true;
-            foreach ($filters as $field_key => $filter_value) {
-                if (isset($row['data'][$field_key]) && $row['data'][$field_key] != $filter_value) {
-                    $include = false;
-                    break;
-                }
-            }
-            if ($include) {
-                $filtered_data[] = $row;
-            }
-        }
-        $data = $filtered_data;
-    }
-    
-    // انتخاب شده‌ها
-    if (!empty($selected_ids)) {
-        $selected_data = array();
-        foreach ($data as $row) {
-            if (in_array($row['id'], $selected_ids)) {
-                $selected_data[] = $row;
-            }
-        }
-        $data = $selected_data;
-    }
-    
-    // ایجاد گزارش
-    $result = wf_generate_excel_report($data, $fields, null, array(
-        'filename' => 'گزارش_' . $export_type . '_' . date('Y-m-d'),
-        'manager_name' => $user->display_name,
-        'title' => 'گزارش ' . ($export_type == 'organization' ? 'سازمانی' : 'اداره')
-    ));
-    
-    if ($result['success']) {
-        wp_send_json_success(array(
-            'message' => '✅ گزارش با موفقیت ایجاد شد',
-            'download_url' => $result['url'],
-            'file_info' => array(
-                'name' => $result['filename'],
-                'size' => size_format($result['size']),
-                'records' => $result['records_count'],
-                'format' => isset($result['format']) ? $result['format'] : 'excel'
-            )
-        ));
-    } else {
-        wp_send_json_error(array(
-            'message' => 'خطا در ایجاد گزارش: ' . ($result['error'] ?? 'خطای نامشخص')
-        ));
-    }
-}
-
-/**
- * ایجاد گزارش تست
- */
-function wf_test_excel_system_simple() {
-    $fields = array(
-        array('field_key' => 'id', 'field_name' => 'ردیف', 'field_type' => 'number'),
-        array('field_key' => 'name', 'field_name' => 'نام', 'field_type' => 'text'),
-        array('field_key' => 'date', 'field_name' => 'تاریخ', 'field_type' => 'date'),
-        array('field_key' => 'amount', 'field_name' => 'مبلغ', 'field_type' => 'number'),
-        array('field_key' => 'active', 'field_name' => 'فعال', 'field_type' => 'checkbox')
-    );
-    
-    $data = array();
-    for ($i = 1; $i <= 10; $i++) {
-        $data[] = array(
-            'id' => $i,
-            'data' => array(
-                'id' => $i,
-                'name' => 'کاربر ' . $i,
-                'date' => '2024-01-' . str_pad($i, 2, '0', STR_PAD_LEFT),
-                'amount' => $i * 1000000,
-                'active' => $i % 2 == 0
-            )
-        );
-    }
-    
-    return wf_generate_excel_report($data, $fields, null, array(
-        'filename' => 'تست_سیستم_اکسل',
-        'title' => 'گزارش تست سیستم'
-    ));
-}
-
-/**
- * بررسی سیستم
- */
-function wf_check_excel_system() {
-    $checks = array(
-        'php_version' => version_compare(PHP_VERSION, '7.0.0', '>='),
-        'memory_limit' => ini_get('memory_limit'),
-        'upload_dir' => wp_upload_dir(),
-        'php_excel_class' => class_exists('PHPExcel'),
-        'date_functions' => function_exists('gregorian_to_jalali')
-    );
-    
-    // تست ایجاد دایرکتوری
-    $export_dir = WP_CONTENT_DIR . '/uploads/workforce_exports/';
-    if (!file_exists($export_dir)) {
-        wp_mkdir_p($export_dir);
-        $checks['export_dir_created'] = file_exists($export_dir);
-    } else {
-        $checks['export_dir_exists'] = true;
-    }
-    
-    // تست نوشتن فایل
-    $test_file = $export_dir . 'test.txt';
-    file_put_contents($test_file, 'test');
-    $checks['can_write'] = file_exists($test_file);
-    if (file_exists($test_file)) {
-        unlink($test_file);
-    }
-    
-    return $checks;
-}
-
-/**
- * فعال‌سازی سیستم
- */
-function wf_install_excel_system_simple() {
-    // ایجاد دایرکتوری‌ها
-    $directories = array(
-        WP_CONTENT_DIR . '/uploads/workforce_exports/',
-        WP_CONTENT_DIR . '/uploads/workforce_backups/'
-    );
-    
-    foreach ($directories as $dir) {
-        if (!file_exists($dir)) {
-            wp_mkdir_p($dir);
+        foreach ($data as $index => $person) {
+            $row = [
+                $index + 1,
+                $person['department_name'],
+                $person['national_code'],
+                $person['first_name'],
+                $person['last_name'],
+                $person['employment_date'],
+                $person['employment_type'],
+                $person['status'],
+                $person['age'],
+                $person['experience'],
+                $person['last_edit']
+            ];
             
-            // ایجاد فایل htaccess برای حفاظت
-            $htaccess = $dir . '.htaccess';
-            if (!file_exists($htaccess)) {
-                file_put_contents($htaccess, "Order Deny,Allow\nDeny from all\n<FilesMatch '\.(xlsx?|csv|html)$'>\nAllow from all\n</FilesMatch>");
+            foreach ($important_fields as $field) {
+                $value = $person['meta'][$field->id] ?? $person['meta'][$field->field_name] ?? '';
+                $row[] = $value;
             }
             
-            // ایجاد فایل index برای امنیت
-            $index = $dir . 'index.html';
-            if (!file_exists($index)) {
-                file_put_contents($index, '<!DOCTYPE html><html><head><title>403 Forbidden</title></head><body><h1>Forbidden</h1><p>You don\'t have permission to access this directory.</p></body></html>');
-            }
+            fputcsv($output, $row);
         }
+        
+        fclose($output);
+        exit;
     }
-    
-    // ایجاد جدول لاگ‌ها
-    global $wpdb;
-    $charset_collate = $wpdb->get_charset_collate();
-    
-    $sql = "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}wf_export_logs (
-        id INT(11) NOT NULL AUTO_INCREMENT,
-        export_type VARCHAR(50) NOT NULL,
-        exporter_id INT(11) NOT NULL,
-        filename VARCHAR(255) NOT NULL,
-        file_size BIGINT(20) DEFAULT 0,
-        records_count INT(11) DEFAULT 0,
-        ip_address VARCHAR(45),
-        user_agent TEXT,
-        created_at DATETIME,
-        PRIMARY KEY (id),
-        KEY exporter_id (exporter_id),
-        KEY created_at (created_at)
-    ) $charset_collate;";
-    
-    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-    dbDelta($sql);
-    
-    return 'سیستم اکسل ساده با موفقیت نصب شد';
 }
 
 /**
- * منوی تست در پیشخوان
+ * توابع عمومی برای دسترسی به کلاس
  */
-add_action('admin_menu', function() {
-    add_submenu_page(
-        'workforce-management',
-        'تست سیستم اکسل',
-        'تست اکسل',
-        'manage_options',
-        'workforce-excel-test',
-        'wf_render_excel_test_page'
-    );
-});
-
-function wf_render_excel_test_page() {
-    if (!current_user_can('manage_options')) {
-        wp_die('دسترسی غیرمجاز');
-    }
-    
-    if (isset($_POST['test_excel'])) {
-        $result = wf_test_excel_system_simple();
-        echo '<div class="notice notice-success"><p>تست انجام شد. نتیجه: ' . print_r($result, true) . '</p></div>';
-    }
-    
-    if (isset($_POST['check_system'])) {
-        $checks = wf_check_excel_system();
-        echo '<div class="notice notice-info"><pre>' . print_r($checks, true) . '</pre></div>';
-    }
-    
-    ?>
-    <div class="wrap">
-        <h1>🔄 تست سیستم اکسل</h1>
-        
-        <div class="card" style="max-width: 600px; margin: 20px 0;">
-            <h2>بررسی سیستم</h2>
-            <form method="post">
-                <p>با کلیک بر روی دکمه زیر، سیستم اکسل بررسی می‌شود.</p>
-                <button type="submit" name="check_system" class="button button-primary">بررسی سیستم</button>
-            </form>
-        </div>
-        
-        <div class="card" style="max-width: 600px; margin: 20px 0;">
-            <h2>تست ایجاد گزارش</h2>
-            <form method="post">
-                <p>با کلیک بر روی دکمه زیر، یک گزارش تست ایجاد می‌شود.</p>
-                <button type="submit" name="test_excel" class="button button-secondary">ایجاد گزارش تست</button>
-            </form>
-        </div>
-        
-        <div class="card" style="max-width: 600px; margin: 20px 0;">
-            <h2>راهنمای نصب PHPExcel (اختیاری)</h2>
-            <p>برای عملکرد کامل، می‌توانید PHPExcel را نصب کنید:</p>
-            <ol>
-                <li>دانلود از: <a href="https://github.com/PHPOffice/PHPExcel/releases" target="_blank">PHPExcel Releases</a></li>
-                <li>استخراج فایل‌ها در پوشه: <code>/wp-content/plugins/workforce-beni-asadd/includes/phpexcel/</code></li>
-                <li>ساختار پوشه باید به این صورت باشد:
-                    <pre>
-/includes/phpexcel/
-    ├── PHPExcel.php
-    ├── PHPExcel/
-    │   ├── Autoloader.php
-    │   └── ...
-    └── autoload.php
-                    </pre>
-                </li>
-            </ol>
-        </div>
-    </div>
-    <?php
+function workforce_export_excel_handler() {
+    $exporter = new Workforce_Excel_Export();
+    $exporter->export_excel();
 }
+add_action('wp_ajax_workforce_export_excel', 'workforce_export_excel_handler');
+add_action('wp_ajax_nopriv_workforce_export_excel', 'workforce_export_excel_handler');
 
-// فعال‌سازی
-register_activation_hook(__FILE__, 'wf_install_excel_system_simple');
-
-// ==================== نکات مهم ====================
-
-/**
- * نکات استفاده:
- * 
- * 1. این فایل کاملاً مستقل است و نیاز به نصب چیزی ندارد
- * 2. اگر PHPExcel نصب باشد، از آن استفاده می‌کند
- * 3. اگر PHPExcel نباشد، گزارش HTML و CSV ایجاد می‌کند
- * 4. توابع تاریخ شمسی داخلی هستند
- * 5. از فونت پیش‌فرض سیستم استفاده می‌کند
- * 
- * برای عملکرد بهتر:
- * - PHPExcel را دانلود و در پوشه includes قرار دهید
- * - memory_limit سرور را افزایش دهید
- */
-
-?>
+function workforce_export_org_excel_handler() {
+    $exporter = new Workforce_Excel_Export();
+    $exporter->export_org_excel();
+}
+add_action('wp_ajax_workforce_export_org_excel', 'workforce_export_org_excel_handler');
+add_action('wp_ajax_nopriv_workforce_export_org_excel', 'workforce_export_org_excel_handler');
