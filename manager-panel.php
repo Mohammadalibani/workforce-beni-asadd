@@ -2288,41 +2288,58 @@ function workforce_ajax_get_personnel_form() {
 }
 add_action('wp_ajax_workforce_get_personnel_form', 'workforce_ajax_get_personnel_form');
 
-function workforce_ajax_save_personnel() {
-    check_ajax_referer('workforce_nonce', 'nonce');
+function workforce_ajax_update_personnel() {
+    // دیباگ: لاگ همه داده‌ها
+    error_log('=== AJAX UPDATE PERSONNEL CALLED ===');
+    error_log('POST Data: ' . print_r($_POST, true));
     
-    $personnel_id = intval($_POST['personnel_id']);
-    $current_user_id = get_current_user_id();
+    // بررسی nonce - از هر دو حالت
+    $nonce = $_POST['nonce'] ?? $_POST['_wpnonce'] ?? '';
+    error_log('Nonce received: ' . $nonce);
     
-    // گرفتن اطلاعات فعلی برای مقایسه
+    if (!wp_verify_nonce($nonce, 'workforce_nonce')) {
+        error_log('Nonce verification FAILED');
+        wp_send_json_error(['message' => 'توکن امنیتی نامعتبر است.']);
+    }
+    
+    error_log('Nonce verification SUCCESS');
+    
+    $personnel_id = intval($_POST['personnel_id'] ?? 0);
+    error_log('Personnel ID: ' . $personnel_id);
+    
+    if (!$personnel_id) {
+        wp_send_json_error(['message' => 'شناسه پرسنل نامعتبر است.']);
+    }
+    
+    // گرفتن اطلاعات فعلی
     $personnel = workforce_get_personnel($personnel_id);
     if (!$personnel) {
         wp_send_json_error(['message' => 'پرسنل یافت نشد.']);
     }
     
-    $data_before = [
-        'national_code' => $personnel->national_code,
-        'first_name' => $personnel->first_name,
-        'last_name' => $personnel->last_name,
-        'employment_date' => $personnel->employment_date,
-        'employment_type' => $personnel->employment_type,
-        'status' => $personnel->status,
-        'meta' => workforce_get_personnel_meta($personnel_id)
-    ];
+    // آماده‌سازی داده‌های جدید
+    $data_after = [];
     
-    // آماده‌سازی اطلاعات جدید
-    $data_after = [
-        'national_code' => sanitize_text_field($_POST['national_code'] ?? $personnel->national_code),
-        'first_name' => sanitize_text_field($_POST['first_name'] ?? $personnel->first_name),
-        'last_name' => sanitize_text_field($_POST['last_name'] ?? $personnel->last_name),
-        'employment_date' => sanitize_text_field($_POST['employment_date'] ?? $personnel->employment_date),
-        'employment_type' => sanitize_text_field($_POST['employment_type'] ?? $personnel->employment_type),
-        'status' => sanitize_text_field($_POST['status'] ?? $personnel->status),
-    ];
+    // فیلدهای اصلی
+    $fields_to_update = ['national_code', 'first_name', 'last_name', 'employment_date', 'employment_type', 'status'];
+    foreach ($fields_to_update as $field) {
+        if (isset($_POST[$field])) {
+            $value = sanitize_text_field($_POST[$field]);
+            
+            // اصلاح تاریخ نادرست
+            if ($field === 'employment_date' && ($value === '0000-00-00' || empty($value))) {
+                $value = $personnel->employment_date; // نگه داشتن تاریخ قبلی
+            }
+            
+            $data_after[$field] = $value;
+            error_log("Field $field: " . $value);
+        }
+    }
     
     // اضافه کردن فیلدهای متا
     $fields = workforce_get_all_fields();
-    $data_after['meta'] = [];
+    $meta_updates = [];
+    
     foreach ($fields as $field) {
         if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
             $field_name = 'field_' . $field->id;
@@ -2330,29 +2347,34 @@ function workforce_ajax_save_personnel() {
                 $value = $field->field_type === 'checkbox' ? 
                          (isset($_POST[$field_name]) ? '1' : '0') : 
                          sanitize_text_field($_POST[$field_name]);
-                $data_after['meta'][$field->id] = $value;
+                $meta_updates[$field->id] = $value;
+                error_log("Meta field {$field->field_name}: " . $value);
             }
         }
     }
     
     // بررسی تغییرات
     $has_changes = false;
-    $changes = [];
     
+    // مقایسه فیلدهای اصلی
     foreach ($data_after as $key => $value) {
-        if ($key === 'meta') {
-            foreach ($value as $field_id => $field_value) {
-                $before_value = $data_before['meta'][$field_id] ?? '';
-                if ($before_value != $field_value) {
-                    $has_changes = true;
-                    $field = workforce_get_field($field_id);
-                    $changes[] = $field ? $field->field_label : "فیلد $field_id";
-                }
-            }
-        } else {
-            if ($data_before[$key] != $value) {
+        $before_value = $personnel->$key ?? '';
+        if ($before_value != $value) {
+            $has_changes = true;
+            error_log("Change detected in $key: $before_value -> $value");
+            break;
+        }
+    }
+    
+    // اگر تغییر اصلی نیست، متا فیلدها رو چک کن
+    if (!$has_changes && !empty($meta_updates)) {
+        $current_meta = workforce_get_personnel_meta($personnel_id);
+        foreach ($meta_updates as $field_id => $value) {
+            $before_value = $current_meta[$field_id] ?? '';
+            if ($before_value != $value) {
                 $has_changes = true;
-                $changes[] = $key;
+                error_log("Meta change detected in field $field_id");
+                break;
             }
         }
     }
@@ -2366,7 +2388,8 @@ function workforce_ajax_save_personnel() {
         if ($field->is_locked) {
             $field_name = 'field_' . $field->id;
             if (isset($_POST[$field_name])) {
-                $before_value = $data_before['meta'][$field->id] ?? '';
+                $current_meta = workforce_get_personnel_meta($personnel_id);
+                $before_value = $current_meta[$field->id] ?? '';
                 $after_value = sanitize_text_field($_POST[$field_name]);
                 
                 if ($before_value != $after_value) {
@@ -2379,31 +2402,63 @@ function workforce_ajax_save_personnel() {
     }
     
     // ایجاد درخواست تایید
+    $data_before = [
+        'national_code' => $personnel->national_code,
+        'first_name' => $personnel->first_name,
+        'last_name' => $personnel->last_name,
+        'employment_date' => $personnel->employment_date,
+        'employment_type' => $personnel->employment_type,
+        'status' => $personnel->status,
+        'meta' => workforce_get_personnel_meta($personnel_id)
+    ];
+    
     $approval_data = [
         'request_type' => 'edit_personnel',
-        'requester_id' => $current_user_id,
+        'requester_id' => get_current_user_id(),
         'target_id' => $personnel_id,
         'target_type' => 'personnel',
         'data_before' => $data_before,
-        'data_after' => $data_after,
+        'data_after' => [
+            'personnel' => $data_after,
+            'meta' => $meta_updates
+        ],
     ];
     
+    error_log('Creating approval request...');
     $approval_id = workforce_add_approval_request($approval_data);
     
     if ($approval_id) {
+        error_log('Approval created with ID: ' . $approval_id);
+        
         // لاگ فعالیت
         workforce_log_activity(
-            $current_user_id,
+            get_current_user_id(),
             'request_edit_personnel',
-            "درخواست ویرایش پرسنل ID: $personnel_id. تغییرات: " . implode(', ', $changes)
+            "درخواست ویرایش پرسنل ID: $personnel_id"
         );
         
-        wp_send_json_success(['message' => 'تغییرات با موفقیت ثبت شد و در انتظار تایید است.']);
+        wp_send_json_success([
+            'message' => 'تغییرات با موفقیت ثبت شد و در انتظار تایید است.',
+            'approval_id' => $approval_id,
+            'debug' => [
+                'personnel_id' => $personnel_id,
+                'fields_updated' => array_keys($data_after),
+                'meta_updated' => array_keys($meta_updates)
+            ]
+        ]);
     } else {
+        error_log('Failed to create approval');
         wp_send_json_error(['message' => 'خطا در ثبت درخواست.']);
     }
 }
-add_action('wp_ajax_workforce_save_personnel', 'workforce_ajax_save_personnel');
+
+// ثبت hook با نام جدید
+add_action('wp_ajax_workforce_update_personnel', 'workforce_ajax_update_personnel');
+remove_action('wp_ajax_workforce_save_personnel', 'workforce_ajax_save_personnel'); // اگر قبلاً ثبت شده
+
+function workforce_ajax_update_personnel_nopriv() {
+    wp_send_json_error(['message' => 'نیاز به لاگین دارد.']);
+}
 
 function workforce_ajax_request_delete_personnel() {
     check_ajax_referer('workforce_nonce', 'nonce');
