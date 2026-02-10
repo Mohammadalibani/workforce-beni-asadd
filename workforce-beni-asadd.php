@@ -185,7 +185,45 @@ function workforce_enqueue_assets() {
 }
 add_action('wp_enqueue_scripts', 'workforce_enqueue_assets');
 add_action('admin_enqueue_scripts', 'workforce_enqueue_assets');
-
+// جلوگیری از تداخل با admin.php
+add_action('admin_footer', 'workforce_fix_admin_js', 999);
+function workforce_fix_admin_js() {
+    ?>
+    <script>
+    // تعریف توابع global
+    if (typeof editPersonnel === 'undefined') {
+        window.editPersonnel = function(personnelId) {
+            console.log('editPersonnel called:', personnelId);
+            // کد AJAX برای ویرایش
+            jQuery.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'workforce_get_personnel_form_admin',
+                    personnel_id: personnelId,
+                    nonce: '<?php echo wp_create_nonce("workforce_admin_nonce"); ?>'
+                },
+                success: function(response) {
+                    if (response.success) {
+                        // نمایش مودال
+                        document.getElementById('personnelModalTitle').textContent = 'ویرایش پرسنل';
+                        document.getElementById('personnelModalBody').innerHTML = response.data.html;
+                        document.getElementById('personnelModal').style.display = 'block';
+                    }
+                }
+            });
+        };
+    }
+    
+    if (typeof viewPersonnel === 'undefined') {
+        window.viewPersonnel = function(personnelId) {
+            console.log('viewPersonnel called:', personnelId);
+            alert('مشاهده پرسنل ID: ' + personnelId);
+        };
+    }
+    </script>
+    <?php
+}
 // تعریف منوهای ادمین
 function workforce_admin_menu() {
     add_menu_page(
