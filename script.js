@@ -1418,56 +1418,102 @@ function showDeptDetails(deptId) {
         }
     }
 
-    /**
-     * ذخیره فرم ویرایش
-     */
-    function savePersonnelForm() {
-        if (workforce.status.saving) return;
+function savePersonnelForm() {
+    console.log('📝 شروع ذخیره فرم...');
 
-        const personnelId = $('#sideForm').data('current-personnel-id');
-        if (!personnelId) return;
+    // گرفتن ID پرسنل
+    const personnelId = $('#sideForm').data('current-personnel-id');
+    console.log('Personnel ID:', personnelId);
 
-        const $form = $('#sideFormBody').find('form');
-        if (!$form.length) return;
-
-        workforce.status.saving = true;
-        showLoading();
-
-        const formData = new FormData($form[0]);
-        formData.append('action', 'workforce_save_personnel');
-        formData.append('personnel_id', personnelId);
-        formData.append('nonce', workforce.config.nonce);
-
-        $.ajax({
-            url: workforce.config.apiUrl,
-            type: 'POST',
-            data: formData,
-            processData: false,
-            contentType: false,
-            dataType: 'json',
-            success: function (response) {
-                if (response.success) {
-                    showNotification('تغییرات با موفقیت ذخیره شد و برای تایید ارسال شد', 'success');
-                    hideSideForm();
-                    loadInitialData();
-                    updateMonitoringCards();
-                } else {
-                    showNotification(
-                        'خطا: ' + (response.data?.message || 'خطای ناشناخته'),
-                        'error'
-                    );
-                }
-            },
-            error: function (xhr, status, error) {
-                showNotification('خطا در ارتباط با سرور', 'error');
-                console.error('خطای AJAX:', error);
-            },
-            complete: function () {
-                workforce.status.saving = false;
-                hideLoading();
-            },
-        });
+    if (!personnelId) {
+        alert('شناسه پرسنل پیدا نشد!');
+        return;
     }
+
+    // جمع‌آوری داده‌های فرم
+    const formData = new FormData();
+
+    // اضافه کردن فیلدهای اصلی
+    formData.append('action', 'workforce_update_personnel');
+    formData.append('personnel_id', personnelId);
+    formData.append('nonce', workforce_ajax.nonce);
+
+    // اضافه کردن همه inputها، selectها و textareaها
+    $('#sideFormBody')
+        .find('input, select, textarea')
+        .each(function () {
+            const $el = $(this);
+            const name = $el.attr('name');
+            const type = $el.attr('type');
+
+            if (!name) {
+                console.log('⚠️ فیلد بدون name:', $el);
+                return;
+            }
+
+            let value;
+
+            if (type === 'checkbox') {
+                value = $el.is(':checked') ? '1' : '0';
+                console.log(`✓ Checkbox ${name}: ${value}`);
+            } else if (type === 'radio') {
+                if ($el.is(':checked')) {
+                    value = $el.val();
+                    console.log(`✓ Radio ${name}: ${value}`);
+                } else {
+                    return; // radio انتخاب نشده
+                }
+            } else {
+                value = $el.val();
+                console.log(`✓ Field ${name}: ${value}`);
+            }
+
+            formData.append(name, value);
+        });
+
+    // نمایش همه داده‌های ارسالی
+    console.log('📦 داده‌های ارسالی:');
+    for (let pair of formData.entries()) {
+        console.log(`  ${pair[0]}: ${pair[1]}`);
+    }
+
+    // شمارش فیلدها
+    let fieldCount = 0;
+    for (let pair of formData.entries()) {
+        if (pair[0].startsWith('field_')) {
+            fieldCount++;
+        }
+    }
+    console.log(`📊 تعداد متا فیلدها: ${fieldCount}`);
+
+    // ارسال درخواست
+    $.ajax({
+        url: ajaxurl,
+        type: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function (response) {
+            console.log('✅ پاسخ سرور:', response);
+            if (response.success) {
+                alert('✅ ' + response.data.message);
+                console.log('🔍 Debug info:', response.data.debug);
+
+                // رفرش جدول
+                setTimeout(() => {
+                    loadInitialData();
+                    hideSideForm();
+                }, 1000);
+            } else {
+                alert('❌ خطا: ' + response.data.message);
+            }
+        },
+        error: function (xhr, status, error) {
+            console.error('❌ خطای AJAX:', xhr.responseText);
+            alert('⚠️ خطا در ارتباط با سرور');
+        },
+    });
+}
 
     /**
      * درخواست حذف پرسنل
