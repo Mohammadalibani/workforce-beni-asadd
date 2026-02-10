@@ -1,10 +1,6 @@
 <?php
 /**
- * پنل اصلی مدیران - سیستم مدیریت کارکرد پرسنل بنی اسد
- * فایل اصلی رابط کاربری مدیران (اداره و سازمان)
- * 
- * @package Workforce_Beni_Asad
- * @version 1.0.0
+ * پنل اصلی مدیران (اداره و سازمان)
  */
 
 // جلوگیری از دسترسی مستقیم
@@ -12,2072 +8,2717 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// بررسی وجود توابع کمکی
-if (!function_exists('wf_get_user_role')) {
-    require_once WF_PLUGIN_DIR . 'helpers.php';
-}
-
 /**
- * نمایش پنل اصلی مدیران
- *
- * @param string $panel_type نوع پنل (department|organization)
- * @return string HTML خروجی پنل
+ * پنل مدیر اداره
  */
-function wf_render_manager_panel($panel_type = 'department') {
-    // بررسی ورود کاربر
-    if (!is_user_logged_in()) {
-        return wf_render_login_form();
+function workforce_dept_manager_panel($user_id) {
+    $current_user = wp_get_current_user();
+    $user_departments = workforce_get_user_departments($user_id);
+    
+    if (empty($user_departments)) {
+        return '<div class="workforce-error">شما به هیچ اداره‌ای دسترسی ندارید. لطفا با مدیر سیستم تماس بگیرید.</div>';
     }
     
-    // تشخیص سطح دسترسی کاربر
-    $user_id = get_current_user_id();
-    $user_role = wf_get_user_role($user_id);
+    // مدیر ممکن است چندین اداره داشته باشد
+    $department = $user_departments[0];
+    $department_id = $department->id;
     
-    // بررسی مجوز دسترسی
-    if (!wf_check_manager_access($user_id, $panel_type)) {
-        return wf_render_access_denied();
-    }
+    // گرفتن دوره فعال
+    $active_period = workforce_get_active_period();
+    $period_id = $active_period ? $active_period->id : null;
     
-    // دریافت اطلاعات کاربر و اداره
-    $user_info = wf_get_manager_info($user_id, $panel_type);
-    $active_period = wf_get_active_period();
+    // گرفتن فیلدها
+    $fields = workforce_get_all_fields();
     
-    // بارگذاری داده‌های پرسنل
-    $personnel_data = wf_load_personnel_data($user_id, $panel_type, $active_period['id']);
-    
-    // بارگذاری فیلدهای تعریف شده
-    $fields = wf_get_all_fields();
-    
-    // تولید خروجی HTML
     ob_start();
     ?>
-    
-    <!-- ==================== -->
-    <!-- استایل‌های اختصاصی -->
-    <!-- ==================== -->
-    <style>
-    .wf-panel-container {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-        padding: 20px;
-    }
-    
-    .wf-main-wrapper {
-        max-width: 100%;
-        margin: 0 auto;
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        overflow: hidden;
-        position: relative;
-    }
-    
-    /* هدر هوشمند */
-    .wf-smart-header {
-        background: linear-gradient(90deg, #1e3a8a 0%, #1e40af 100%);
-        color: white;
-        padding: 25px 30px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .wf-smart-header::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        right: -20%;
-        width: 300px;
-        height: 300px;
-        background: rgba(255,255,255,0.1);
-        border-radius: 50%;
-    }
-    
-    .wf-user-info h2 {
-        margin: 0 0 10px 0;
-        font-size: 24px;
-        font-weight: 600;
-    }
-    
-    .wf-user-info .wf-meta {
-        display: flex;
-        gap: 25px;
-        font-size: 14px;
-        opacity: 0.9;
-    }
-    
-    .wf-meta-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    
-    .wf-meta-item i {
-        font-size: 16px;
-    }
-    
-    .wf-period-info {
-        background: rgba(255,255,255,0.15);
-        padding: 12px 20px;
-        border-radius: 12px;
-        backdrop-filter: blur(10px);
-    }
-    
-    .wf-period-info .wf-date {
-        font-size: 18px;
-        font-weight: 600;
-        margin-bottom: 5px;
-    }
-    
-    .wf-period-info .wf-status {
-        font-size: 12px;
-        opacity: 0.8;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-    }
-    
-    /* کارت‌های مانیتورینگ */
-    .wf-monitoring-cards {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 20px;
-        padding: 30px;
-        background: #f8fafc;
-        border-bottom: 1px solid #e2e8f0;
-    }
-    
-    .wf-card {
-        background: white;
-        border-radius: 16px;
-        padding: 25px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        transition: all 0.3s ease;
-        border: 2px solid transparent;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .wf-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-    }
-    
-    .wf-card.wf-card-essential {
-        border-color: #f59e0b;
-        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    }
-    
-    .wf-card.wf-card-critical {
-        border-color: #ef4444;
-        background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-    }
-    
-    .wf-card.wf-card-success {
-        border-color: #10b981;
-        background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-    }
-    
-    .wf-card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 15px;
-    }
-    
-    .wf-card-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: #4b5563;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-    
-    .wf-card-icon {
-        width: 50px;
-        height: 50px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-        color: white;
-    }
-    
-    .wf-card-value {
-        font-size: 32px;
-        font-weight: 700;
-        color: #1f2937;
-        margin: 10px 0;
-    }
-    
-    .wf-card-progress {
-        height: 6px;
-        background: #e5e7eb;
-        border-radius: 3px;
-        overflow: hidden;
-        margin: 15px 0;
-    }
-    
-    .wf-card-progress-bar {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.5s ease;
-    }
-    
-    /* نوار ابزار */
-    .wf-toolbar {
-        background: white;
-        padding: 20px 30px;
-        border-bottom: 1px solid #e2e8f0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        position: sticky;
-        top: 0;
-        z-index: 100;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    }
-    
-    .wf-action-buttons {
-        display: flex;
-        gap: 12px;
-    }
-    
-    .wf-btn {
-        padding: 12px 24px;
-        border-radius: 10px;
-        font-weight: 600;
-        font-size: 14px;
-        border: none;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    
-    .wf-btn-primary {
-        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-        color: white;
-    }
-    
-    .wf-btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(59, 130, 246, 0.4);
-    }
-    
-    .wf-btn-danger {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-        color: white;
-    }
-    
-    .wf-btn-success {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
-    }
-    
-    /* جدول اصلی */
-    .wf-table-container {
-        position: relative;
-        overflow: auto;
-        max-height: 600px;
-        padding: 0 30px 30px;
-    }
-    
-    .wf-excel-table {
-        width: 100%;
-        border-collapse: separate;
-        border-spacing: 0;
-        min-width: 1200px;
-    }
-    
-    .wf-table-header {
-        position: sticky;
-        top: 0;
-        z-index: 50;
-        background: white;
-    }
-    
-    .wf-table-header th {
-        padding: 18px 15px;
-        text-align: right;
-        font-weight: 600;
-        font-size: 13px;
-        color: #4b5563;
-        border-bottom: 2px solid #e5e7eb;
-        background: #f9fafb;
-        white-space: nowrap;
-        position: relative;
-        user-select: none;
-    }
-    
-    .wf-table-header th.wf-required {
-        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    }
-    
-    .wf-table-header th.wf-locked {
-        background: #1f2937;
-        color: white;
-    }
-    
-    .wf-header-content {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-    }
-    
-    .wf-header-icons {
-        display: flex;
-        gap: 5px;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-    }
-    
-    .wf-table-header th:hover .wf-header-icons {
-        opacity: 1;
-    }
-    
-    .wf-icon-btn {
-        width: 28px;
-        height: 28px;
-        border-radius: 6px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: white;
-        border: 1px solid #e5e7eb;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-size: 14px;
-    }
-    
-    .wf-icon-btn:hover {
-        background: #3b82f6;
-        color: white;
-        border-color: #3b82f6;
-        transform: scale(1.1);
-    }
-    
-    .wf-table-body td {
-        padding: 15px;
-        border-bottom: 1px solid #e5e7eb;
-        font-size: 14px;
-        transition: all 0.2s ease;
-        position: relative;
-    }
-    
-    .wf-table-body tr {
-        transition: all 0.2s ease;
-    }
-    
-    .wf-table-body tr:hover {
-        background: #f8fafc;
-    }
-    
-    .wf-table-body tr.wf-selected {
-        background: #dbeafe;
-    }
-    
-    .wf-table-body tr.wf-deleted {
-        opacity: 0.5;
-    }
-    
-    .wf-checkbox-cell {
-        width: 50px;
-        text-align: center;
-    }
-    
-    .wf-checkbox {
-        width: 18px;
-        height: 18px;
-        border-radius: 4px;
-        border: 2px solid #d1d5db;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-    
-    .wf-checkbox:checked {
-        background: #3b82f6;
-        border-color: #3b82f6;
-    }
-    
-    /* فرم ویرایش سایدبار */
-    .wf-edit-sidebar {
-        position: fixed;
-        top: 0;
-        right: -450px;
-        width: 450px;
-        height: 100vh;
-        background: white;
-        box-shadow: -5px 0 30px rgba(0,0,0,0.15);
-        z-index: 1000;
-        transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        display: flex;
-        flex-direction: column;
-    }
-    
-    .wf-edit-sidebar.wf-active {
-        right: 0;
-    }
-    
-    .wf-sidebar-header {
-        padding: 25px;
-        border-bottom: 1px solid #e5e7eb;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: #f8fafc;
-    }
-    
-    .wf-sidebar-title {
-        font-size: 20px;
-        font-weight: 600;
-        color: #1f2937;
-    }
-    
-    .wf-sidebar-close {
-        width: 36px;
-        height: 36px;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #f3f4f6;
-        border: none;
-        cursor: pointer;
-        font-size: 18px;
-        transition: all 0.2s ease;
-    }
-    
-    .wf-sidebar-close:hover {
-        background: #ef4444;
-        color: white;
-    }
-    
-    .wf-sidebar-content {
-        flex: 1;
-        overflow-y: auto;
-        padding: 25px;
-    }
-    
-    .wf-form-group {
-        margin-bottom: 25px;
-    }
-    
-    .wf-form-label {
-        display: block;
-        margin-bottom: 8px;
-        font-weight: 600;
-        color: #374151;
-        font-size: 14px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    
-    .wf-form-label i {
-        color: #6b7280;
-    }
-    
-    .wf-form-input {
-        width: 100%;
-        padding: 12px 15px;
-        border: 2px solid #e5e7eb;
-        border-radius: 10px;
-        font-size: 14px;
-        transition: all 0.2s ease;
-        background: white;
-    }
-    
-    .wf-form-input:focus {
-        outline: none;
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-    }
-    
-    .wf-form-input.wf-locked {
-        background: #f9fafb;
-        color: #6b7280;
-        cursor: not-allowed;
-    }
-    
-    .wf-sidebar-footer {
-        padding: 20px 25px;
-        border-top: 1px solid #e5e7eb;
-        display: flex;
-        gap: 10px;
-        background: #f8fafc;
-    }
-    
-    .wf-nav-btn {
-        width: 45px;
-        height: 45px;
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: white;
-        border: 2px solid #e5e7eb;
-        cursor: pointer;
-        font-size: 18px;
-        transition: all 0.2s ease;
-    }
-    
-    .wf-nav-btn:hover {
-        background: #3b82f6;
-        color: white;
-        border-color: #3b82f6;
-    }
-    
-    .wf-save-btn {
-        flex: 1;
-        height: 45px;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
-        border: none;
-        font-weight: 600;
-        font-size: 15px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-    }
-    
-    .wf-save-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(16, 185, 129, 0.4);
-    }
-    
-    /* صفحه‌بندی */
-    .wf-pagination {
-        padding: 20px 30px;
-        border-top: 1px solid #e5e8eb;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: #f8fafc;
-    }
-    
-    .wf-page-info {
-        font-size: 14px;
-        color: #6b7280;
-    }
-    
-    .wf-page-buttons {
-        display: flex;
-        gap: 8px;
-    }
-    
-    .wf-page-btn {
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: white;
-        border: 1px solid #e5e7eb;
-        color: #4b5563;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-size: 14px;
-    }
-    
-    .wf-page-btn:hover {
-        background: #3b82f6;
-        color: white;
-        border-color: #3b82f6;
-    }
-    
-    .wf-page-btn.wf-active {
-        background: #3b82f6;
-        color: white;
-        border-color: #3b82f6;
-    }
-    
-    /* مودال فیلتر */
-    .wf-filter-modal {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%) scale(0.9);
-        width: 500px;
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 25px 50px rgba(0,0,0,0.2);
-        z-index: 2000;
-        opacity: 0;
-        visibility: hidden;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    
-    .wf-filter-modal.wf-active {
-        opacity: 1;
-        visibility: visible;
-        transform: translate(-50%, -50%) scale(1);
-    }
-    
-    .wf-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0,0,0,0.5);
-        z-index: 999;
-        opacity: 0;
-        visibility: hidden;
-        transition: all 0.3s ease;
-    }
-    
-    .wf-overlay.wf-active {
-        opacity: 1;
-        visibility: visible;
-    }
-    
-    /* بارگذاری */
-    .wf-loading {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(255,255,255,0.9);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 9999;
-        backdrop-filter: blur(5px);
-    }
-    
-    .wf-spinner {
-        width: 60px;
-        height: 60px;
-        border: 4px solid #e5e7eb;
-        border-top-color: #3b82f6;
-        border-radius: 50%;
-        animation: wf-spin 1s linear infinite;
-    }
-    
-    @keyframes wf-spin {
-        to { transform: rotate(360deg); }
-    }
-    
-    /* ریسپانسیو */
-    @media (max-width: 1024px) {
-        .wf-monitoring-cards {
-            grid-template-columns: repeat(2, 1fr);
+    <div class="workforce-manager-panel" data-dept-id="<?php echo esc_attr($department_id); ?>" data-period-id="<?php echo esc_attr($period_id); ?>">
+        <!-- هدر هوشمند -->
+        <div class="workforce-header">
+            <div class="header-content">
+                <div class="welcome-section">
+                    <div class="welcome-icon">👋</div>
+                    <div class="welcome-text">
+                        <h2>خوش آمدید، <?php echo esc_html($current_user->display_name); ?></h2>
+                        <div class="welcome-details">
+<span class="detail-item">
+    <span class="detail-icon">🏢</span>
+    <span class="detail-text"><?php echo esc_html($department->name); ?>
+        <?php
+        // نمایش مدیران
+        if (!empty($department->managers)) {
+            $manager_names = [];
+            foreach ($department->managers as $dept_manager) {
+                $mgr_user = get_userdata($dept_manager->user_id);
+                if ($mgr_user) {
+                    $prefix = $dept_manager->is_primary ? '⭐ ' : '';
+                    $manager_names[] = $prefix . $mgr_user->display_name;
+                }
+            }
+            echo '<br><small>👤 ' . esc_html(implode('، ', array_slice($manager_names, 0, 2))) . 
+                 (count($manager_names) > 2 ? ' و ' . (count($manager_names) - 2) . ' نفر دیگر' : '') . 
+                 '</small>';
+        } else {
+            echo '<br><small>👤 تعیین نشده</small>';
         }
-        
-        .wf-edit-sidebar {
-            width: 100%;
-            right: -100%;
-        }
-    }
-    
-    @media (max-width: 768px) {
-        .wf-smart-header {
-            flex-direction: column;
-            gap: 20px;
-            text-align: center;
-        }
-        
-        .wf-user-info .wf-meta {
-            flex-direction: column;
-            gap: 10px;
-        }
-        
-        .wf-monitoring-cards {
-            grid-template-columns: 1fr;
-        }
-        
-        .wf-toolbar {
-            flex-direction: column;
-            gap: 15px;
-        }
-        
-        .wf-action-buttons {
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        
-        .wf-filter-modal {
-            width: 90%;
-        }
-    }
-    </style>
-    
-    <!-- ======================== -->
-    <!-- HTML اصلی پنل -->
-    <!-- ======================== -->
-    <div class="wf-panel-container" id="wf-manager-panel">
-        
-        <!-- Overlay برای مودال‌ها -->
-        <div class="wf-overlay" id="wf-overlay"></div>
-        
-        <!-- بارگذاری -->
-        <div class="wf-loading" id="wf-loading">
-            <div class="wf-spinner"></div>
-        </div>
-        
-        <!-- فرم ویرایش سایدبار -->
-        <div class="wf-edit-sidebar" id="wf-edit-sidebar">
-            <div class="wf-sidebar-header">
-                <h3 class="wf-sidebar-title" id="wf-edit-title">ویرایش پرسنل</h3>
-                <button class="wf-sidebar-close" id="wf-close-edit">✕</button>
-            </div>
-            <div class="wf-sidebar-content" id="wf-edit-content">
-                <!-- فرم به صورت پویا تولید می‌شود -->
-            </div>
-            <div class="wf-sidebar-footer">
-                <button class="wf-nav-btn" id="wf-prev-record">⏮️</button>
-                <button class="wf-save-btn" id="wf-save-record">💾 ذخیره</button>
-                <button class="wf-nav-btn" id="wf-next-record">⏭️</button>
+        ?>
+    </span>
+</span>
+                            <span class="detail-item">
+                                <span class="detail-icon">📅</span>
+                                <span class="detail-text">دوره: <?php echo $active_period ? esc_html($active_period->name) : 'تعیین نشده'; ?></span>
+                            </span>
+                            <span class="detail-item">
+                                <span class="detail-icon">🕒</span>
+                                <span class="detail-text">امروز: <?php echo esc_html(workforce_today_jalali()); ?></span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button type="button" class="button button-primary" onclick="showAddPersonnelModal()">
+                        <span class="action-icon">➕</span>
+                        افزودن پرسنل
+                    </button>
+                    <button type="button" class="button button-secondary" onclick="exportToExcel()">
+                        <span class="action-icon">📤</span>
+                        خروجی اکسل
+                    </button>
+                    <button type="button" class="button" onclick="refreshData()">
+                        <span class="action-icon">🔄</span>
+                        به‌روزرسانی
+                    </button>
+                </div>
             </div>
         </div>
         
-        <!-- مودال فیلتر -->
-        <div class="wf-filter-modal" id="wf-filter-modal">
-            <div class="wf-sidebar-header">
-                <h3 class="wf-sidebar-title">فیلتر پیشرفته</h3>
-                <button class="wf-sidebar-close" id="wf-close-filter">✕</button>
+        <!-- کارت‌های مانیتورینگ -->
+        <div class="workforce-monitoring-cards" id="monitoringCards">
+            <!-- کارت‌های ثابت -->
+            <div class="monitoring-card card-blue" id="cardPersonnelCount">
+                <div class="card-icon">👥</div>
+                <div class="card-content">
+                    <h3>وضعیت پرسنل</h3>
+                    <p class="card-number" id="personnelCount">0</p>
+                    <p class="card-sub">نفر</p>
+                </div>
             </div>
-            <div class="wf-sidebar-content" id="wf-filter-content">
-                <!-- فیلترها به صورت پویا تولید می‌شوند -->
+            
+            <div class="monitoring-card card-dynamic" id="cardRequiredFields">
+                <div class="card-icon">📊</div>
+                <div class="card-content">
+                    <h3>فیلدهای ضروری</h3>
+                    <p class="card-number" id="requiredFieldsPercent">0%</p>
+                    <p class="card-sub">پر شده</p>
+                </div>
+                <div class="card-progress">
+                    <div class="progress-bar" id="requiredFieldsProgress"></div>
+                </div>
             </div>
-            <div class="wf-sidebar-footer">
-                <button class="wf-btn wf-btn-danger" id="wf-clear-filters">
-                    🗑️ پاک کردن همه
-                </button>
-                <button class="wf-btn wf-btn-success" id="wf-apply-filters">
-                    🔍 اعمال فیلتر
-                </button>
+            
+            <div class="monitoring-card card-red" id="cardWarnings">
+                <div class="card-icon">⚠️</div>
+                <div class="card-content">
+                    <h3>هشدار</h3>
+                    <p class="card-number" id="warningCount">0</p>
+                    <p class="card-sub">اطلاعات ناقص</p>
+                </div>
             </div>
+            
+            <!-- کارت‌های داینامیک اینجا اضافه می‌شوند -->
         </div>
         
-        <!-- wrapper اصلی -->
-        <div class="wf-main-wrapper">
-            
-            <!-- هدر هوشمند -->
-            <div class="wf-smart-header">
-                <div class="wf-user-info">
-                    <h2>👋 خوش آمدید، <?php echo esc_html($user_info['name']); ?></h2>
-                    <div class="wf-meta">
-                        <div class="wf-meta-item">
-                            <i>🏢</i>
-                            <span><?php echo esc_html($user_info['department']); ?> / <?php echo esc_html($user_info['organization']); ?></span>
-                        </div>
-                        <div class="wf-meta-item">
-                            <i>👑</i>
-                            <span><?php echo esc_html($user_info['role_name']); ?></span>
-                        </div>
+        <!-- جدول اصلی -->
+        <div class="workforce-main-table">
+            <!-- نوار ابزار جدول -->
+            <div class="table-toolbar">
+                <div class="toolbar-left">
+                    <div class="records-per-page">
+                        <label>نمایش:</label>
+                        <select id="recordsPerPage" onchange="changeRecordsPerPage(this.value)">
+                            <option value="25">۲۵</option>
+                            <option value="50">۵۰</option>
+                            <option value="100">۱۰۰</option>
+                            <option value="all">همه</option>
+                        </select>
+                    </div>
+                    
+                    <div class="record-counter" id="recordCounter">
+                        نمایش ۰-۰ از ۰ رکورد
                     </div>
                 </div>
                 
-                <div class="wf-period-info">
-                    <div class="wf-date">
-                        📅 دوره فعال: <?php echo esc_html($active_period['title']); ?>
+                <div class="toolbar-right">
+                    <div class="search-box">
+                        <input type="text" id="globalSearch" placeholder="جستجو در همه فیلدها..." onkeyup="performGlobalSearch(this.value)">
+                        <span class="search-icon">🔍</span>
                     </div>
-                    <div class="wf-status">
-                        🕒 امروز: <?php echo wf_get_persian_date(); ?>
-                    </div>
+                    
+                    <button type="button" class="button button-small" onclick="clearAllFilters()">
+                        <span class="button-icon">🗑️</span>
+                        پاک کردن فیلترها
+                    </button>
                 </div>
             </div>
             
-            <!-- کارت‌های مانیتورینگ -->
-            <div class="wf-monitoring-cards" id="wf-monitoring-cards">
-                <!-- کارت‌های ثابت -->
-                <div class="wf-card wf-card-essential">
-                    <div class="wf-card-header">
-                        <div class="wf-card-title">وضعیت پرسنل</div>
-                        <div class="wf-card-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
-                            👥
-                        </div>
-                    </div>
-                    <div class="wf-card-value" id="wf-total-personnel">۰</div>
-                    <div class="wf-card-progress">
-                        <div class="wf-card-progress-bar" id="wf-personnel-progress" style="width: 100%; background: #3b82f6;"></div>
-                    </div>
-                    <div class="wf-card-footer">
-                        <small>کل پرسنل فعال</small>
-                    </div>
-                </div>
-                
-                <div class="wf-card wf-card-success">
-                    <div class="wf-card-header">
-                        <div class="wf-card-title">فیلدهای ضروری</div>
-                        <div class="wf-card-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                            ✅
-                        </div>
-                    </div>
-                    <div class="wf-card-value" id="wf-required-percent">۰٪</div>
-                    <div class="wf-card-progress">
-                        <div class="wf-card-progress-bar" id="wf-required-progress" style="width: 0%; background: #10b981;"></div>
-                    </div>
-                    <div class="wf-card-footer">
-                        <small>درصد تکمیل اطلاعات</small>
-                    </div>
-                </div>
-                
-                <div class="wf-card wf-card-critical">
-                    <div class="wf-card-header">
-                        <div class="wf-card-title">هشدار</div>
-                        <div class="wf-card-icon" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
-                            ⚠️
-                        </div>
-                    </div>
-                    <div class="wf-card-value" id="wf-incomplete-count">۰</div>
-                    <div class="wf-card-progress">
-                        <div class="wf-card-progress-bar" id="wf-incomplete-progress" style="width: 0%; background: #ef4444;"></div>
-                    </div>
-                    <div class="wf-card-footer">
-                        <small>پرسنل با اطلاعات ناقص</small>
-                    </div>
-                </div>
-                
-                <!-- کارت‌های داینامیک اینجا اضافه می‌شوند -->
-                <div id="wf-dynamic-cards"></div>
-            </div>
-            
-            <!-- نوار ابزار اقدامات -->
-            <div class="wf-toolbar">
-                <div class="wf-action-buttons">
-                    <button class="wf-btn wf-btn-primary" id="wf-add-personnel">
-                        ➕ افزودن پرسنل جدید
-                    </button>
-                    <button class="wf-btn wf-btn-danger" id="wf-delete-selected">
-                        🗑️ حذف انتخاب شده‌ها
-                    </button>
-                    <button class="wf-btn wf-btn-success" id="wf-export-excel">
-                        📤 خروجی Excel
-                    </button>
-                    <button class="wf-btn wf-btn-primary" id="wf-advanced-filter">
-                        🔍 فیلتر پیشرفته
-                    </button>
-                </div>
-                
-                <div class="wf-display-options">
-                    <select class="wf-form-input" id="wf-page-size" style="width: 120px;">
-                        <option value="25">۲۵ رکورد در صفحه</option>
-                        <option value="50">۵۰ رکورد در صفحه</option>
-                        <option value="100">۱۰۰ رکورد در صفحه</option>
-                    </select>
-                </div>
-            </div>
-            
-            <!-- جدول اصلی -->
-            <div class="wf-table-container">
-                <table class="wf-excel-table" id="wf-main-table">
-                    <thead class="wf-table-header" id="wf-table-header">
+            <!-- جدول داده‌ها -->
+            <div class="table-container">
+                <table class="workforce-data-table" id="personnelTable">
+                    <thead>
                         <tr>
-                            <th class="wf-checkbox-cell">
-                                <input type="checkbox" class="wf-checkbox" id="wf-select-all">
+                            <th class="checkbox-col">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
                             </th>
-                            <!-- سرستون‌ها به صورت پویا تولید می‌شوند -->
+                            <th class="row-number">ردیف</th>
+                            
                             <?php foreach ($fields as $field): ?>
-                            <?php
-                            $field_class = '';
-                            if ($field['required']) $field_class .= ' wf-required';
-                            if ($field['locked']) $field_class .= ' wf-locked';
-                            ?>
-                            <th class="<?php echo esc_attr($field_class); ?>" data-field-id="<?php echo esc_attr($field['id']); ?>">
-                                <div class="wf-header-content">
-                                    <span><?php echo esc_html($field['title']); ?></span>
-                                    <div class="wf-header-icons">
-                                        <button class="wf-icon-btn wf-filter-btn" title="فیلتر">
-                                            🔍
-                                        </button>
-                                        <button class="wf-icon-btn wf-card-btn" title="ساخت کارت">
-                                            📊
-                                        </button>
-                                        <button class="wf-icon-btn wf-pin-btn" title="پین ستون">
-                                            📌
-                                        </button>
+                                <?php
+                                $col_class = '';
+                                if ($field->is_required) $col_class .= ' required-col';
+                                if ($field->is_locked) $col_class .= ' locked-col';
+                                if ($field->is_monitoring) $col_class .= ' monitoring-col';
+                                ?>
+                                <th class="<?php echo esc_attr($col_class); ?>" data-field-id="<?php echo esc_attr($field->id); ?>" data-field-name="<?php echo esc_attr($field->field_name); ?>">
+                                    <div class="column-header">
+                                        <span class="column-title"><?php echo esc_html($field->field_label); ?></span>
+                                        <div class="column-actions">
+                                            <?php if ($field->is_monitoring): ?>
+                                                <button type="button" class="column-action-btn" onclick="createMonitoringCard(<?php echo $field->id; ?>, '<?php echo esc_attr($field->field_label); ?>')" title="ساخت کارت مانیتورینگ">
+                                                    📊
+                                                </button>
+                                            <?php endif; ?>
+                                            <button type="button" class="column-action-btn" onclick="showColumnFilter(<?php echo $field->id; ?>)" title="فیلتر ستونی">
+                                                🔍
+                                            </button>
+                                            <button type="button" class="column-action-btn pin-btn" onclick="togglePinColumn(this)" title="ثابت کردن ستون">
+                                                📌
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
-                            </th>
+                                </th>
                             <?php endforeach; ?>
+                            
+                            <th class="actions-col">عملیات</th>
                         </tr>
                     </thead>
-                    <tbody class="wf-table-body" id="wf-table-body">
-                        <!-- داده‌ها به صورت پویا بارگذاری می‌شوند -->
-                        <tr>
-                            <td colspan="<?php echo count($fields) + 1; ?>" style="text-align: center; padding: 50px;">
-                                در حال بارگذاری داده‌ها...
-                            </td>
-                        </tr>
+                    <tbody id="tableBody">
+                        <!-- داده‌ها از طریق AJAX بارگذاری می‌شوند -->
                     </tbody>
                 </table>
             </div>
             
             <!-- صفحه‌بندی -->
-            <div class="wf-pagination">
-                <div class="wf-page-info">
-                    نمایش <span id="wf-start-record">۰</span> - <span id="wf-end-record">۰</span> 
-                    از <span id="wf-total-records">۰</span> رکورد
+            <div class="table-pagination">
+                <div class="pagination-info" id="paginationInfo"></div>
+                <div class="pagination-controls">
+                    <button type="button" class="pagination-btn" onclick="goToPage(1)" disabled id="firstPage">اولین</button>
+                    <button type="button" class="pagination-btn" onclick="goToPreviousPage()" disabled id="prevPage">قبلی</button>
+                    
+                    <div class="page-numbers" id="pageNumbers"></div>
+                    
+                    <button type="button" class="pagination-btn" onclick="goToNextPage()" disabled id="nextPage">بعدی</button>
+                    <button type="button" class="pagination-btn" onclick="goToLastPage()" disabled id="lastPage">آخرین</button>
                 </div>
-                
-                <div class="wf-page-buttons" id="wf-pagination-buttons">
-                    <button class="wf-page-btn wf-page-prev">«</button>
-                    <button class="wf-page-btn wf-active">۱</button>
-                    <button class="wf-page-btn">۲</button>
-                    <button class="wf-page-btn">۳</button>
-                    <button class="wf-page-btn wf-page-next">»</button>
+            </div>
+        </div>
+        
+        <!-- فرم سمت راست برای ویرایش -->
+        <div class="workforce-side-form" id="sideForm">
+            <div class="side-form-header">
+                <h3 id="formTitle">ویرایش پرسنل</h3>
+                <button type="button" class="side-form-close" onclick="hideSideForm()">&times;</button>
+            </div>
+            <div class="side-form-body" id="sideFormBody">
+                <!-- محتوای فرم اینجا بارگذاری می‌شود -->
+            </div>
+            <div class="side-form-footer">
+                <div class="form-navigation">
+                    <button type="button" class="button button-small" onclick="navigatePersonnel('prev')" id="prevBtn">⏮️ قبلی</button>
+                    <button type="button" class="button button-primary" onclick="savePersonnelForm()">ذخیره</button>
+                    <button type="button" class="button button-small" onclick="navigatePersonnel('next')" id="nextBtn">بعدی ⏭️</button>
                 </div>
-                
-                <div class="wf-page-size">
-                    <select class="wf-form-input" id="wf-page-size-bottom" style="width: 140px;">
-                        <option value="25">۲۵ رکورد در صفحه</option>
-                        <option value="50">۵۰ رکورد در صفحه</option>
-                        <option value="100">۱۰۰ رکورد در صفحه</option>
-                    </select>
+                <button type="button" class="button button-link" onclick="hideSideForm()">انصراف</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- مودال افزودن پرسنل -->
+    <div id="addPersonnelModal" class="workforce-modal">
+        <div class="workforce-modal-content wide-modal">
+            <div class="workforce-modal-header">
+                <h2>افزودن پرسنل جدید</h2>
+                <span class="workforce-modal-close" onclick="hideAddPersonnelModal()">&times;</span>
+            </div>
+            <div class="workforce-modal-body">
+                <form id="addPersonnelForm">
+                    <div class="form-sections">
+                        <div class="form-section">
+                            <h3>اطلاعات پایه</h3>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label for="new_national_code">کدملی <span class="required">*</span></label>
+                                    <input type="text" id="new_national_code" name="national_code" required pattern="[0-9]{10}" maxlength="10">
+                                    <div class="validation-message" id="nationalCodeValidation"></div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="new_first_name">نام <span class="required">*</span></label>
+                                    <input type="text" id="new_first_name" name="first_name" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="new_last_name">نام خانوادگی <span class="required">*</span></label>
+                                    <input type="text" id="new_last_name" name="last_name" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="new_employment_date">تاریخ استخدام <span class="required">*</span></label>
+                                    <input type="text" id="new_employment_date" name="employment_date" class="jdatepicker" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="new_employment_type">نوع استخدام</label>
+                                    <select id="new_employment_type" name="employment_type">
+                                        <option value="permanent">دائمی</option>
+                                        <option value="contract">پیمانی</option>
+                                        <option value="temporary">موقت</option>
+                                        <option value="project">پروژه‌ای</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="new_status">وضعیت</label>
+                                    <select id="new_status" name="status">
+                                        <option value="active">فعال</option>
+                                        <option value="inactive">غیرفعال</option>
+                                        <option value="suspended">تعلیق</option>
+                                        <option value="retired">بازنشسته</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-section">
+                            <h3>اطلاعات تکمیلی</h3>
+                            <div class="form-grid" id="additionalFields">
+                                <!-- فیلدهای اضافی اینجا بارگذاری می‌شوند -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="button" class="button button-primary" onclick="submitAddPersonnelForm()">ثبت درخواست</button>
+                        <button type="button" class="button" onclick="hideAddPersonnelModal()">انصراف</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- مودال فیلتر ستونی -->
+    <div id="columnFilterModal" class="workforce-modal">
+        <div class="workforce-modal-content">
+            <div class="workforce-modal-header">
+                <h2 id="filterModalTitle">فیلتر ستون</h2>
+                <span class="workforce-modal-close" onclick="hideColumnFilterModal()">&times;</span>
+            </div>
+            <div class="workforce-modal-body">
+                <div id="filterContent">
+                    <!-- محتوای فیلتر اینجا بارگذاری می‌شود -->
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- ======================== -->
-    <!-- جاوااسکریپت -->
-    <!-- ======================== -->
+    <!-- اسکریپت‌ها -->
     <script>
-    (function($) {
-        'use strict';
-        
-        // داده‌های گلوبال
-        window.wfData = {
-            personnel: <?php echo json_encode($personnel_data, JSON_UNESCAPED_UNICODE); ?>,
-            fields: <?php echo json_encode($fields, JSON_UNESCAPED_UNICODE); ?>,
-            currentPage: 1,
-            pageSize: 25,
-            filters: {},
-            selectedRows: [],
-            currentEditIndex: -1,
-            dynamicCards: []
+    // داده‌های جهانی
+    var workforceData = {
+        currentPage: 1,
+        recordsPerPage: 25,
+        totalRecords: 0,
+        totalPages: 0,
+        currentFilters: {},
+        currentSearch: '',
+        selectedRows: [],
+        currentPersonnelId: null,
+        pinnedColumns: [],
+        monitoringCards: [],
+        departmentId: <?php echo esc_js($department_id); ?>,
+        periodId: <?php echo esc_js($period_id); ?>,
+        fields: <?php echo json_encode($fields); ?>
+    };
+    
+    // بارگذاری اولیه داده‌ها
+    document.addEventListener('DOMContentLoaded', function() {
+        loadTableData();
+        updateMonitoringCards();
+        setupEventListeners();
+        setupKeyboardShortcuts();
+    });
+    
+    // بارگذاری داده‌های جدول
+    function loadTableData() {
+        var params = {
+            action: 'workforce_get_table_data',
+            department_id: workforceData.departmentId,
+            period_id: workforceData.periodId,
+            page: workforceData.currentPage,
+            per_page: workforceData.recordsPerPage,
+            filters: workforceData.currentFilters,
+            search: workforceData.currentSearch,
+            nonce: workforce_ajax.nonce
         };
         
-        // ثابت‌ها
-        const WF_CONSTANTS = {
-            MAX_DYNAMIC_CARDS: 6,
-            DEBOUNCE_DELAY: 300,
-            SAVE_TIMEOUT: 2000
-        };
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: params,
+            success: function(response) {
+                if (response.success) {
+                    renderTable(response.data);
+                    updatePagination(response.data.pagination);
+                    updateRecordCounter(response.data.pagination);
+                }
+            }
+        });
+    }
+    
+    // رندر جدول
+    function renderTable(data) {
+        var tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
         
-        /**
-         * مقداردهی اولیه سیستم
-         */
-        function initWorkforcePanel() {
-            // مخفی کردن لودینگ
-            $('#wf-loading').fadeOut(300);
-            
-            // بارگذاری اولیه داده‌ها
-            loadTableData();
-            updateMonitoringCards();
-            setupEventListeners();
-            setupKeyboardShortcuts();
-            
-            // به‌روزرسانی کارت‌های ثابت
-            updateStaticCards();
+        if (data.rows.length === 0) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td colspan="' + (workforceData.fields.length + 3) + '" class="no-data">داده‌ای یافت نشد.</td>';
+            tbody.appendChild(tr);
+            return;
         }
         
-        /**
-         * بارگذاری داده‌های جدول
-         */
-        function loadTableData() {
-            const startIndex = (wfData.currentPage - 1) * wfData.pageSize;
-            const endIndex = Math.min(startIndex + wfData.pageSize, wfData.personnel.length);
-            const pageData = wfData.personnel.slice(startIndex, endIndex);
-            
-            // پاک کردن محتوای قبلی
-            $('#wf-table-body').empty();
-            
-            // تولید ردیف‌های جدید
-            pageData.forEach((person, index) => {
-                const rowIndex = startIndex + index;
-                const rowClass = person.deleted ? 'wf-deleted' : '';
-                const selectedClass = wfData.selectedRows.includes(rowIndex) ? 'wf-selected' : '';
-                
-                let rowHtml = `<tr class="${rowClass} ${selectedClass}" data-index="${rowIndex}">`;
-                
-                // سلول چک‌باکس
-                const checked = wfData.selectedRows.includes(rowIndex) ? 'checked' : '';
-                rowHtml += `
-                    <td class="wf-checkbox-cell">
-                        <input type="checkbox" class="wf-checkbox wf-row-checkbox" ${checked}>
-                    </td>
-                `;
-                
-                // سلول‌های داده
-                wfData.fields.forEach(field => {
-                    const value = person[field.name] || '';
-                    const cellClass = field.locked ? 'wf-locked-cell' : '';
-                    rowHtml += `
-                        <td class="${cellClass}" data-field="${field.name}">
-                            ${escapeHtml(value)}
-                        </td>
-                    `;
-                });
-                
-                rowHtml += '</tr>';
-                $('#wf-table-body').append(rowHtml);
-            });
-            
-            // به‌روزرسانی اطلاعات صفحه
-            updatePaginationInfo();
-            
-            // افزودن رویدادها به ردیف‌ها
-            attachRowEvents();
-        }
-        
-        /**
-         * به‌روزرسانی کارت‌های مانیتورینگ
-         */
-        function updateMonitoringCards() {
-            const total = wfData.personnel.length;
-            const requiredFields = wfData.fields.filter(f => f.required).length;
-            
-            // محاسبه درصد تکمیل اطلاعات ضروری
-            let completedCount = 0;
-            wfData.personnel.forEach(person => {
-                let personCompleted = true;
-                wfData.fields.forEach(field => {
-                    if (field.required && !person[field.name]) {
-                        personCompleted = false;
-                    }
-                });
-                if (personCompleted) completedCount++;
-            });
-            
-            const completionPercent = total > 0 ? Math.round((completedCount / total) * 100) : 0;
-            const incompleteCount = total - completedCount;
-            
-            // به‌روزرسانی کارت‌های ثابت
-            $('#wf-total-personnel').text(total.toLocaleString('fa-IR'));
-            $('#wf-required-percent').text(completionPercent + '%');
-            $('#wf-required-progress').css('width', completionPercent + '%');
-            $('#wf-incomplete-count').text(incompleteCount.toLocaleString('fa-IR'));
-            $('#wf-incomplete-progress').css('width', ((incompleteCount / total) * 100) + '%');
-            
-            // به‌روزرسانی کارت‌های داینامیک
-            updateDynamicCards();
-        }
-        
-        /**
-         * تنظیم رویدادها
-         */
-        function setupEventListeners() {
-            // انتخاب همه
-            $('#wf-select-all').on('change', function() {
-                const isChecked = $(this).prop('checked');
-                $('.wf-row-checkbox').prop('checked', isChecked).trigger('change');
-            });
-            
-            // انتخاب ردیف
-            $(document).on('change', '.wf-row-checkbox', function() {
-                const row = $(this).closest('tr');
-                const index = parseInt(row.data('index'));
-                
-                if ($(this).prop('checked')) {
-                    if (!wfData.selectedRows.includes(index)) {
-                        wfData.selectedRows.push(index);
-                    }
-                    row.addClass('wf-selected');
-                } else {
-                    wfData.selectedRows = wfData.selectedRows.filter(i => i !== index);
-                    row.removeClass('wf-selected');
-                }
-                
-                updateSelectionCount();
-            });
-            
-            // دوبار کلیک برای ویرایش
-            $(document).on('dblclick', '#wf-table-body td:not(.wf-checkbox-cell)', function() {
-                const row = $(this).closest('tr');
-                const index = parseInt(row.data('index'));
-                openEditSidebar(index);
-            });
-            
-            // افزودن پرسنل جدید
-            $('#wf-add-personnel').on('click', function() {
-                openAddPersonnelModal();
-            });
-            
-            // حذف انتخاب شده‌ها
-            $('#wf-delete-selected').on('click', function() {
-                if (wfData.selectedRows.length === 0) {
-                    showAlert('⚠️ لطفا حداقل یک ردیف را انتخاب کنید', 'warning');
-                    return;
-                }
-                
-                if (confirm(`آیا از حذف ${wfData.selectedRows.length} رکورد انتخاب شده اطمینان دارید؟`)) {
-                    deleteSelectedRecords();
-                }
-            });
-            
-            // خروجی اکسل
-            $('#wf-export-excel').on('click', function() {
-                exportToExcel();
-            });
-            
-            // فیلتر پیشرفته
-            $('#wf-advanced-filter').on('click', function() {
-                openFilterModal();
-            });
-            
-            // تغییر اندازه صفحه
-            $('#wf-page-size, #wf-page-size-bottom').on('change', function() {
-                wfData.pageSize = parseInt($(this).val());
-                wfData.currentPage = 1;
-                loadTableData();
-            });
-            
-            // پیمایش صفحه
-            $(document).on('click', '.wf-page-btn:not(.wf-active)', function() {
-                if ($(this).hasClass('wf-page-prev')) {
-                    if (wfData.currentPage > 1) {
-                        wfData.currentPage--;
-                    }
-                } else if ($(this).hasClass('wf-page-next')) {
-                    const totalPages = Math.ceil(wfData.personnel.length / wfData.pageSize);
-                    if (wfData.currentPage < totalPages) {
-                        wfData.currentPage++;
-                    }
-                } else {
-                    wfData.currentPage = parseInt($(this).text());
-                }
-                
-                loadTableData();
-                updatePaginationButtons();
-            });
-            
-            // بستن فرم ویرایش
-            $('#wf-close-edit').on('click', closeEditSidebar);
-            
-            // ذخیره تغییرات
-            $('#wf-save-record').on('click', saveCurrentRecord);
-            
-            // پیمایش بین رکوردها
-            $('#wf-prev-record').on('click', function() {
-                navigateToRecord(-1);
-            });
-            
-            $('#wf-next-record').on('click', function() {
-                navigateToRecord(1);
-            });
-            
-            // آیکن‌های سرستون
-            $(document).on('click', '.wf-filter-btn', function() {
-                const fieldId = $(this).closest('th').data('field-id');
-                openColumnFilter(fieldId);
-            });
-            
-            $(document).on('click', '.wf-card-btn', function() {
-                const fieldId = $(this).closest('th').data('field-id');
-                createDynamicCard(fieldId);
-            });
-            
-            $(document).on('click', '.wf-pin-btn', function() {
-                $(this).toggleClass('wf-active');
-                const fieldId = $(this).closest('th').data('field-id');
-                togglePinColumn(fieldId);
-            });
-            
-            // بستن مودال‌ها با کلیک روی overlay
-            $('#wf-overlay').on('click', function() {
-                closeEditSidebar();
-                closeFilterModal();
-            });
-            
-            // پاک کردن فیلترها
-            $('#wf-clear-filters').on('click', function() {
-                clearAllFilters();
-            });
-            
-            // اعمال فیلترها
-            $('#wf-apply-filters').on('click', function() {
-                applyFilters();
-            });
-            
-            // بستن مودال فیلتر
-            $('#wf-close-filter').on('click', closeFilterModal);
-        }
-        
-        /**
-         * تنظیم شورتکات‌های صفحه‌کلید
-         */
-        function setupKeyboardShortcuts() {
-            $(document).on('keydown', function(e) {
-                // جلوگیری از اجرا در inputها
-                if ($(e.target).is('input, textarea, select')) {
-                    return;
-                }
-                
-                // Ctrl + S: ذخیره
-                if (e.ctrlKey && e.key === 's') {
-                    e.preventDefault();
-                    if ($('#wf-edit-sidebar').hasClass('wf-active')) {
-                        saveCurrentRecord();
-                    }
-                }
-                
-                // Ctrl + F: جستجو
-                if (e.ctrlKey && e.key === 'f') {
-                    e.preventDefault();
-                    $('#wf-advanced-filter').click();
-                }
-                
-                // Ctrl + E: خروجی اکسل
-                if (e.ctrlKey && e.key === 'e') {
-                    e.preventDefault();
-                    exportToExcel();
-                }
-                
-                // Escape: بستن مودال‌ها
-                if (e.key === 'Escape') {
-                    closeEditSidebar();
-                    closeFilterModal();
-                }
-                
-                // فلش‌ها برای پیمایش
-                if ($('#wf-edit-sidebar').hasClass('wf-active')) {
-                    if (e.key === 'ArrowLeft') {
-                        navigateToRecord(-1);
-                    } else if (e.key === 'ArrowRight') {
-                        navigateToRecord(1);
-                    }
-                }
-            });
-        }
-        
-        /**
-         * باز کردن فرم ویرایش
-         */
-        function openEditSidebar(index) {
-            wfData.currentEditIndex = index;
-            const person = wfData.personnel[index];
-            
-            // به‌روزرسانی عنوان
-            $('#wf-edit-title').html(`ویرایش پرسنل: <strong>${escapeHtml(person.name || 'بدون نام')}</strong>`);
-            
-            // تولید فرم
-            let formHtml = '';
-            wfData.fields.forEach(field => {
-                const value = person[field.name] || '';
-                const required = field.required ? 'required' : '';
-                const locked = field.locked ? 'readonly' : '';
-                const inputClass = field.locked ? 'wf-locked' : '';
-                
-                formHtml += `
-                    <div class="wf-form-group">
-                        <label class="wf-form-label">
-                            <i>📝</i>
-                            ${escapeHtml(field.title)}
-                            ${field.required ? '<span style="color: #ef4444;">*</span>' : ''}
-                        </label>
-                        <input type="text" 
-                               class="wf-form-input ${inputClass}"
-                               data-field="${field.name}"
-                               value="${escapeHtml(value)}"
-                               ${required}
-                               ${locked}
-                               placeholder="${field.required ? 'الزامی' : 'اختیاری'}">
-                    </div>
-                `;
-            });
-            
-            $('#wf-edit-content').html(formHtml);
-            
-            // نمایش فرم
-            $('#wf-edit-sidebar').addClass('wf-active');
-            $('#wf-overlay').addClass('wf-active');
-            
-            // فوکوس روی اولین فیلد غیرقفل
-            setTimeout(() => {
-                $('#wf-edit-content .wf-form-input:not(.wf-locked)').first().focus();
-            }, 300);
-        }
-        
-        /**
-         * بستن فرم ویرایش
-         */
-        function closeEditSidebar() {
-            $('#wf-edit-sidebar').removeClass('wf-active');
-            $('#wf-overlay').removeClass('wf-active');
-            wfData.currentEditIndex = -1;
-        }
-        
-        /**
-         * ذخیره رکورد جاری
-         */
-        function saveCurrentRecord() {
-            if (wfData.currentEditIndex === -1) return;
-            
-            const person = wfData.personnel[wfData.currentEditIndex];
-            let hasError = false;
-            
-            // جمع‌آوری داده‌ها از فرم
-            $('#wf-edit-content .wf-form-input').each(function() {
-                const fieldName = $(this).data('field');
-                const value = $(this).val().trim();
-                const field = wfData.fields.find(f => f.name === fieldName);
-                
-                // اعتبارسنجی فیلدهای الزامی
-                if (field && field.required && !value) {
-                    $(this).addClass('wf-error');
-                    showAlert(`فیلد "${field.title}" الزامی است`, 'error');
-                    hasError = true;
-                    return false;
-                }
-                
-                $(this).removeClass('wf-error');
-                person[fieldName] = value;
-            });
-            
-            if (hasError) return;
-            
-            // نمایش موفقیت
-            showAlert('✅ تغییرات با موفقیت ذخیره شد', 'success');
-            
-            // به‌روزرسانی جدول
-            updateRowInTable(wfData.currentEditIndex, person);
-            
-            // بستن فرم بعد از 1 ثانیه
-            setTimeout(closeEditSidebar, 1000);
-        }
-        
-        /**
-         * پیمایش بین رکوردها
-         */
-        function navigateToRecord(direction) {
-            if (wfData.currentEditIndex === -1) return;
-            
-            let newIndex = wfData.currentEditIndex + direction;
-            
-            // محدودیت‌های ابتدا و انتها
-            if (newIndex < 0) newIndex = wfData.personnel.length - 1;
-            if (newIndex >= wfData.personnel.length) newIndex = 0;
-            
-            openEditSidebar(newIndex);
-        }
-        
-        /**
-         * ایجاد کارت داینامیک
-         */
-        function createDynamicCard(fieldId) {
-            const field = wfData.fields.find(f => f.id == fieldId);
-            if (!field) return;
-            
-            // بررسی حداکثر تعداد کارت
-            if (wfData.dynamicCards.length >= WF_CONSTANTS.MAX_DYNAMIC_CARDS) {
-                showAlert(`حداکثر ${WF_CONSTANTS.MAX_DYNAMIC_CARDS} کارت مجاز است`, 'warning');
-                return;
+        data.rows.forEach(function(row, index) {
+            var tr = document.createElement('tr');
+            tr.dataset.personnelId = row.id;
+            if (row.is_deleted) {
+                tr.classList.add('deleted-row');
             }
             
-            // بررسی تکراری نبودن
-            if (wfData.dynamicCards.some(card => card.fieldId == fieldId)) {
-                showAlert('کارت برای این ستون قبلاً ایجاد شده است', 'warning');
-                return;
-            }
+            // ستون انتخاب
+            var tdCheckbox = document.createElement('td');
+            tdCheckbox.className = 'checkbox-col';
+            tdCheckbox.innerHTML = '<input type="checkbox" class="row-checkbox" onchange="toggleRowSelection(' + row.id + ', this)">';
+            tr.appendChild(tdCheckbox);
             
-            // محاسبه آمار
-            const values = wfData.personnel.map(p => p[field.name]).filter(v => v);
-            const sum = values.reduce((a, b) => parseFloat(a) || 0 + parseFloat(b) || 0, 0);
-            const avg = values.length > 0 ? sum / values.length : 0;
-            const count = values.length;
+            // ستون شماره ردیف
+            var tdNumber = document.createElement('td');
+            tdNumber.className = 'row-number';
+            tdNumber.textContent = ((workforceData.currentPage - 1) * workforceData.recordsPerPage) + index + 1;
+            tr.appendChild(tdNumber);
             
-            // ایجاد کارت
-            const cardId = 'wf-card-' + Date.now();
-            const cardHtml = `
-                <div class="wf-card wf-dynamic-card" id="${cardId}">
-                    <div class="wf-card-header">
-                        <div class="wf-card-title">${escapeHtml(field.title)}</div>
-                        <div class="wf-card-actions">
-                            <button class="wf-icon-btn wf-close-card" style="width: 24px; height: 24px; font-size: 12px;">
-                                ✕
-                            </button>
-                        </div>
-                    </div>
-                    <div class="wf-card-value">${formatNumber(sum)}</div>
-                    <div class="wf-card-progress">
-                        <div class="wf-card-progress-bar" style="width: 100%; background: #8b5cf6;"></div>
-                    </div>
-                    <div class="wf-card-footer">
-                        <small>جمع: ${formatNumber(sum)} | میانگین: ${formatNumber(avg)}</small>
-                    </div>
-                </div>
+            // ستون‌های داده
+            workforceData.fields.forEach(function(field) {
+                var td = document.createElement('td');
+                var value = row.meta[field.id] || row.meta[field.field_name] || '';
+                
+                if (field.is_locked) {
+                    td.classList.add('locked-cell');
+                }
+                if (field.is_required && !value) {
+                    td.classList.add('required-empty');
+                }
+                
+                td.textContent = value;
+                td.title = value;
+                tr.appendChild(td);
+            });
+            
+            // ستون عملیات
+            var tdActions = document.createElement('td');
+            tdActions.className = 'actions-col';
+            tdActions.innerHTML = `
+                <button type="button" class="action-btn edit-btn" onclick="editPersonnel(${row.id})" title="ویرایش">
+                    ✏️
+                </button>
+                <button type="button" class="action-btn view-btn" onclick="viewPersonnel(${row.id})" title="مشاهده">
+                    👁️
+                </button>
+                <button type="button" class="action-btn delete-btn" onclick="requestDeletePersonnel(${row.id})" title="حذف">
+                    🗑️
+                </button>
             `;
+            tr.appendChild(tdActions);
             
-            // افزودن به DOM
-            $('#wf-dynamic-cards').append(cardHtml);
-            
-            // ذخیره در آرایه
-            wfData.dynamicCards.push({
-                id: cardId,
-                fieldId: fieldId,
-                fieldName: field.name,
-                title: field.title
-            });
-            
-            // رویداد بستن کارت
-            $(`#${cardId} .wf-close-card`).on('click', function() {
-                $(this).closest('.wf-dynamic-card').remove();
-                wfData.dynamicCards = wfData.dynamicCards.filter(c => c.id !== cardId);
-            });
-        }
-        
-        /**
-         * به‌روزرسانی کارت‌های داینامیک
-         */
-        function updateDynamicCards() {
-            wfData.dynamicCards.forEach(card => {
-                const field = wfData.fields.find(f => f.name === card.fieldName);
-                if (!field) return;
-                
-                const values = wfData.personnel.map(p => p[field.name]).filter(v => v);
-                const sum = values.reduce((a, b) => (parseFloat(a) || 0) + (parseFloat(b) || 0), 0);
-                
-                $(`#${card.id} .wf-card-value`).text(formatNumber(sum));
-            });
-        }
-        
-        /**
-         * باز کردن مودال فیلتر
-         */
-        function openFilterModal() {
-            let filterHtml = '';
-            
-            // فیلتر بر اساس اداره (فقط برای مدیر سازمان)
-            if (wfData.userRole === 'organization_manager') {
-                filterHtml += `
-                    <div class="wf-form-group">
-                        <label class="wf-form-label">🏢 فیلتر بر اساس اداره</label>
-                        <div class="wf-checkbox-group">
-                            <label><input type="checkbox" value="all" checked> همه ادارات</label>
-                            <!-- ادارات به صورت پویا -->
-                        </div>
-                    </div>
-                `;
-            }
-            
-            // فیلتر بر اساس وضعیت تکمیل
-            filterHtml += `
-                <div class="wf-form-group">
-                    <label class="wf-form-label">✅ وضعیت تکمیل اطلاعات</label>
-                    <div class="wf-radio-group">
-                        <label><input type="radio" name="completion" value="all" checked> همه</label>
-                        <label><input type="radio" name="completion" value="complete"> تکمیل شده</label>
-                        <label><input type="radio" name="completion" value="incomplete"> ناقص</label>
-                    </div>
-                </div>
-            `;
-            
-            // فیلترهای ستونی
-            wfData.fields.forEach(field => {
-                if (field.filterable) {
-                    const uniqueValues = [...new Set(wfData.personnel.map(p => p[field.name]).filter(v => v))];
-                    if (uniqueValues.length > 1) {
-                        filterHtml += `
-                            <div class="wf-form-group">
-                                <label class="wf-form-label">${escapeHtml(field.title)}</label>
-                                <select class="wf-form-input" multiple data-field="${field.name}">
-                                    ${uniqueValues.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}
-                                </select>
-                            </div>
-                        `;
-                    }
+            // کلیک روی ردیف
+            tr.addEventListener('click', function(e) {
+                if (!e.target.matches('.row-checkbox, .action-btn, .action-btn *')) {
+                    editPersonnel(row.id);
                 }
             });
             
-            $('#wf-filter-content').html(filterHtml);
-            
-            // نمایش مودال
-            $('#wf-filter-modal').addClass('wf-active');
-            $('#wf-overlay').addClass('wf-active');
+            tbody.appendChild(tr);
+        });
+    }
+    
+    // به‌روزرسانی صفحه‌بندی
+    function updatePagination(pagination) {
+        workforceData.totalRecords = pagination.total_records;
+        workforceData.totalPages = pagination.total_pages;
+        
+        var info = document.getElementById('paginationInfo');
+        var pageNumbers = document.getElementById('pageNumbers');
+        var firstBtn = document.getElementById('firstPage');
+        var prevBtn = document.getElementById('prevPage');
+        var nextBtn = document.getElementById('nextPage');
+        var lastBtn = document.getElementById('lastPage');
+        
+        // به‌روزرسانی دکمه‌ها
+        firstBtn.disabled = workforceData.currentPage === 1;
+        prevBtn.disabled = workforceData.currentPage === 1;
+        nextBtn.disabled = workforceData.currentPage === workforceData.totalPages;
+        lastBtn.disabled = workforceData.currentPage === workforceData.totalPages;
+        
+        // ایجاد شماره صفحات
+        pageNumbers.innerHTML = '';
+        var startPage = Math.max(1, workforceData.currentPage - 2);
+        var endPage = Math.min(workforceData.totalPages, startPage + 4);
+        
+        if (endPage - startPage < 4) {
+            startPage = Math.max(1, endPage - 4);
         }
         
-        /**
-         * بستن مودال فیلتر
-         */
-        function closeFilterModal() {
-            $('#wf-filter-modal').removeClass('wf-active');
-            $('#wf-overlay').removeClass('wf-active');
-        }
-        
-        /**
-         * اعمال فیلترها
-         */
-        function applyFilters() {
-            // جمع‌آوری فیلترها
-            wfData.filters = {};
-            
-            // فیلتر وضعیت تکمیل
-            const completion = $('input[name="completion"]:checked').val();
-            if (completion !== 'all') {
-                wfData.filters.completion = completion;
+        for (var i = startPage; i <= endPage; i++) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'page-number-btn';
+            if (i === workforceData.currentPage) {
+                btn.classList.add('active');
             }
-            
-            // فیلترهای ستونی
-            $('select[data-field]').each(function() {
-                const fieldName = $(this).data('field');
-                const selectedValues = $(this).val();
-                if (selectedValues && selectedValues.length > 0) {
-                    wfData.filters[fieldName] = selectedValues;
-                }
-            });
-            
-            // اعمال فیلترها
-            applyFiltersToData();
-            
-            // بستن مودال
-            closeFilterModal();
-            
-            // نمایش پیام
-            showAlert('✅ فیلترها اعمال شدند', 'success');
-        }
-        
-        /**
-         * پاک کردن همه فیلترها
-         */
-        function clearAllFilters() {
-            wfData.filters = {};
-            loadTableData();
-            updateMonitoringCards();
-            closeFilterModal();
-            showAlert('🗑️ همه فیلترها پاک شدند', 'info');
-        }
-        
-        /**
-         * اعمال فیلترها روی داده‌ها
-         */
-        function applyFiltersToData() {
-            // این تابع در فایل کامل پیاده‌سازی می‌شود
-            console.log('Applying filters:', wfData.filters);
-        }
-        
-        /**
-         * حذف رکوردهای انتخاب شده
-         */
-        function deleteSelectedRecords() {
-            // این تابع در فایل کامل پیاده‌سازی می‌شود
-            console.log('Deleting records:', wfData.selectedRows);
-        }
-        
-        /**
-         * خروجی اکسل
-         */
-        function exportToExcel() {
-            // این تابع در فایل کامل پیاده‌سازی می‌شود
-            console.log('Exporting to Excel');
-        }
-        
-        /**
-         * به‌روزرسانی اطلاعات صفحه‌بندی
-         */
-        function updatePaginationInfo() {
-            const total = wfData.personnel.length;
-            const start = (wfData.currentPage - 1) * wfData.pageSize + 1;
-            const end = Math.min(start + wfData.pageSize - 1, total);
-            
-            $('#wf-start-record').text(start.toLocaleString('fa-IR'));
-            $('#wf-end-record').text(end.toLocaleString('fa-IR'));
-            $('#wf-total-records').text(total.toLocaleString('fa-IR'));
-        }
-        
-        /**
-         * به‌روزرساری دکمه‌های صفحه‌بندی
-         */
-        function updatePaginationButtons() {
-            const totalPages = Math.ceil(wfData.personnel.length / wfData.pageSize);
-            let buttonsHtml = '';
-            
-            // دکمه قبلی
-            buttonsHtml += `<button class="wf-page-btn wf-page-prev" ${wfData.currentPage === 1 ? 'disabled' : ''}>«</button>`;
-            
-            // دکمه‌های صفحات
-            for (let i = 1; i <= Math.min(totalPages, 5); i++) {
-                const activeClass = i === wfData.currentPage ? 'wf-active' : '';
-                buttonsHtml += `<button class="wf-page-btn ${activeClass}">${i}</button>`;
-            }
-            
-            // دکمه بعدی
-            buttonsHtml += `<button class="wf-page-btn wf-page-next" ${wfData.currentPage === totalPages ? 'disabled' : ''}>»</button>`;
-            
-            $('#wf-pagination-buttons').html(buttonsHtml);
-        }
-        
-        /**
-         * نمایش پیام
-         */
-        function showAlert(message, type = 'info') {
-            // حذف آلرت قبلی
-            $('.wf-alert').remove();
-            
-            const colors = {
-                success: '#10b981',
-                error: '#ef4444',
-                warning: '#f59e0b',
-                info: '#3b82f6'
+            btn.textContent = i;
+            btn.onclick = function() {
+                goToPage(parseInt(this.textContent));
             };
-            
-            const alertHtml = `
-                <div class="wf-alert" style="
-                    position: fixed;
-                    top: 20px;
-                    right: 20px;
-                    background: ${colors[type]};
-                    color: white;
-                    padding: 15px 25px;
-                    border-radius: 10px;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-                    z-index: 9999;
-                    animation: wf-slideIn 0.3s ease;
-                ">
-                    ${message}
-                </div>
-            `;
-            
-            $('body').append(alertHtml);
-            
-            // حذف خودکار بعد از 3 ثانیه
-            setTimeout(() => {
-                $('.wf-alert').fadeOut(300, function() {
-                    $(this).remove();
-                });
-            }, 3000);
+            pageNumbers.appendChild(btn);
+        }
+    }
+    
+    // به‌روزرسانی شمارنده رکوردها
+    function updateRecordCounter(pagination) {
+        var start = ((workforceData.currentPage - 1) * workforceData.recordsPerPage) + 1;
+        var end = Math.min(workforceData.currentPage * workforceData.recordsPerPage, pagination.total_records);
+        var counter = document.getElementById('recordCounter');
+        counter.textContent = 'نمایش ' + start + '-' + end + ' از ' + pagination.total_records + ' رکورد';
+    }
+    
+    // تغییر تعداد رکورد در صفحه
+    function changeRecordsPerPage(value) {
+        if (value === 'all') {
+            workforceData.recordsPerPage = 999999;
+        } else {
+            workforceData.recordsPerPage = parseInt(value);
+        }
+        workforceData.currentPage = 1;
+        loadTableData();
+    }
+    
+    // رفتن به صفحه مشخص
+    function goToPage(page) {
+        if (page >= 1 && page <= workforceData.totalPages) {
+            workforceData.currentPage = page;
+            loadTableData();
+            scrollToTableTop();
+        }
+    }
+    
+    function goToPreviousPage() {
+        if (workforceData.currentPage > 1) {
+            goToPage(workforceData.currentPage - 1);
+        }
+    }
+    
+    function goToNextPage() {
+        if (workforceData.currentPage < workforceData.totalPages) {
+            goToPage(workforceData.currentPage + 1);
+        }
+    }
+    
+    function goToFirstPage() {
+        goToPage(1);
+    }
+    
+    function goToLastPage() {
+        goToPage(workforceData.totalPages);
+    }
+    
+    // جستجوی سراسری
+    function performGlobalSearch(query) {
+        workforceData.currentSearch = query;
+        workforceData.currentPage = 1;
+        loadTableData();
+    }
+    
+    // پاک کردن همه فیلترها
+    function clearAllFilters() {
+        workforceData.currentFilters = {};
+        workforceData.currentSearch = '';
+        document.getElementById('globalSearch').value = '';
+        loadTableData();
+    }
+    
+    // ایجاد کارت مانیتورینگ
+    function createMonitoringCard(fieldId, fieldLabel) {
+        // بررسی محدودیت تعداد کارت‌ها
+        if (workforceData.monitoringCards.length >= 6) {
+            alert('حداکثر ۶ کارت مانیتورینگ فعال می‌توانید داشته باشید. لطفا ابتدا یکی از کارت‌ها را ببندید.');
+            return;
         }
         
-        /**
-         * فرار از HTML
-         */
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        // بررسی تکراری نبودن
+        if (workforceData.monitoringCards.includes(fieldId)) {
+            alert('کارت مانیتورینگ برای این فیلد قبلا ایجاد شده است.');
+            return;
         }
         
-        /**
-         * فرمت اعداد
-         */
-        function formatNumber(num) {
-            return new Intl.NumberFormat('fa-IR').format(num);
+        workforceData.monitoringCards.push(fieldId);
+        
+        // ایجاد عنصر کارت
+        var cardsContainer = document.getElementById('monitoringCards');
+        var card = document.createElement('div');
+        card.className = 'monitoring-card card-dynamic';
+        card.id = 'monitoringCard_' + fieldId;
+        card.innerHTML = `
+            <div class="card-icon">📊</div>
+            <div class="card-content">
+                <h3>${fieldLabel}</h3>
+                <p class="card-number" id="cardValue_${fieldId}">0</p>
+                <p class="card-sub">مجموع</p>
+            </div>
+            <button type="button" class="card-close" onclick="removeMonitoringCard(${fieldId})">✕</button>
+        `;
+        cardsContainer.appendChild(card);
+        
+        // به‌روزرسانی مقدار کارت
+        updateMonitoringCardValue(fieldId);
+    }
+    
+    // حذف کارت مانیتورینگ
+    function removeMonitoringCard(fieldId) {
+        var index = workforceData.monitoringCards.indexOf(fieldId);
+        if (index > -1) {
+            workforceData.monitoringCards.splice(index, 1);
         }
         
-        /**
-         * به‌روزرسانی ردیف در جدول
-         */
-        function updateRowInTable(index, person) {
-            const row = $(`tr[data-index="${index}"]`);
-            wfData.fields.forEach(field => {
-                const cell = row.find(`td[data-field="${field.name}"]`);
-                cell.text(person[field.name] || '');
-            });
+        var card = document.getElementById('monitoringCard_' + fieldId);
+        if (card) {
+            card.remove();
         }
-        
-        /**
-         * افزودن رویداد به ردیف‌ها
-         */
-        function attachRowEvents() {
-            $('.wf-row-checkbox').on('change', function() {
-                const row = $(this).closest('tr');
-                const index = parseInt(row.data('index'));
-                
-                if ($(this).prop('checked')) {
-                    if (!wfData.selectedRows.includes(index)) {
-                        wfData.selectedRows.push(index);
-                    }
-                    row.addClass('wf-selected');
-                } else {
-                    wfData.selectedRows = wfData.selectedRows.filter(i => i !== index);
-                    row.removeClass('wf-selected');
+    }
+    
+    // به‌روزرسانی کارت‌های مانیتورینگ
+    function updateMonitoringCards() {
+        // آمار کلی
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_department_stats',
+                department_id: workforceData.departmentId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    var stats = response.data;
+                    document.getElementById('personnelCount').textContent = stats.total_personnel;
+                    document.getElementById('requiredFieldsPercent').textContent = stats.completion_rate + '%';
+                    document.getElementById('warningCount').textContent = stats.incomplete_count;
+                    
+                    // نوار پیشرفت
+                    var progressBar = document.getElementById('requiredFieldsProgress');
+                    progressBar.style.width = stats.completion_rate + '%';
+                    progressBar.style.backgroundColor = stats.completion_rate >= 80 ? '#2ecc71' : 
+                                                      stats.completion_rate >= 50 ? '#f39c12' : '#e74c3c';
                 }
-                
-                updateSelectionCount();
-            });
-        }
-        
-        /**
-         * به‌روزرسانی تعداد انتخاب‌ها
-         */
-        function updateSelectionCount() {
-            const count = wfData.selectedRows.length;
-            if (count > 0) {
-                $('#wf-delete-selected').html(`🗑️ حذف (${count})`);
-            } else {
-                $('#wf-delete-selected').html('🗑️ حذف انتخاب شده‌ها');
             }
-        }
-        
-        /**
-         * به‌روزرسانی کارت‌های ثابت
-         */
-        function updateStaticCards() {
-            // محاسبات اضافی برای کارت‌های ثابت
-            const numericFields = wfData.fields.filter(f => 
-                f.type === 'number' || f.type === 'decimal'
-            );
-            
-            if (numericFields.length > 0) {
-                // ایجاد کارت برای اولین فیلد عددی
-                setTimeout(() => {
-                    createDynamicCard(numericFields[0].id);
-                }, 1000);
-            }
-        }
-        
-        /**
-         * باز کردن مودال افزودن پرسنل
-         */
-        function openAddPersonnelModal() {
-            // این تابع در فایل کامل پیاده‌سازی می‌شود
-            console.log('Opening add personnel modal');
-        }
-        
-        /**
-         * باز کردن فیلتر ستونی
-         */
-        function openColumnFilter(fieldId) {
-            // این تابع در فایل کامل پیاده‌سازی می‌شود
-            console.log('Opening column filter for:', fieldId);
-        }
-        
-        /**
-         * پین کردن ستون
-         */
-        function togglePinColumn(fieldId) {
-            // این تابع در فایل کامل پیاده‌سازی می‌شود
-            console.log('Toggling pin for column:', fieldId);
-        }
-        
-        // راه‌اندازی سیستم
-        $(document).ready(function() {
-            initWorkforcePanel();
         });
         
-    })(jQuery);
-    </script>
+        // به‌روزرسانی کارت‌های داینامیک
+        workforceData.monitoringCards.forEach(function(fieldId) {
+            updateMonitoringCardValue(fieldId);
+        });
+    }
     
+    // به‌روزرسانی مقدار یک کارت مانیتورینگ
+    function updateMonitoringCardValue(fieldId) {
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_field_stats',
+                field_id: fieldId,
+                department_id: workforceData.departmentId,
+                period_id: workforceData.periodId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    var valueElement = document.getElementById('cardValue_' + fieldId);
+                    if (valueElement) {
+                        valueElement.textContent = response.data.total;
+                    }
+                }
+            }
+        });
+    }
+    
+    // نشان دادن فیلتر ستونی
+    function showColumnFilter(fieldId) {
+        var field = workforceData.fields.find(function(f) {
+            return f.id === fieldId;
+        });
+        
+        if (!field) return;
+        
+        document.getElementById('filterModalTitle').textContent = 'فیلتر: ' + field.field_label;
+        
+        // گرفتن مقادیر یکتا
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_unique_values',
+                field_id: fieldId,
+                department_id: workforceData.departmentId,
+                period_id: workforceData.periodId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    var values = response.data.values;
+                    var currentFilter = workforceData.currentFilters[fieldId] || [];
+                    
+                    var html = '<div class="filter-content">';
+                    html += '<div class="filter-values">';
+                    
+                    values.forEach(function(value) {
+                        var checked = currentFilter.includes(value) ? ' checked' : '';
+                        html += `
+                            <label class="filter-checkbox">
+                                <input type="checkbox" value="${value}"${checked} onchange="updateColumnFilter(${fieldId}, this)">
+                                <span>${value || '(خالی)'}</span>
+                            </label>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                    html += '<div class="filter-actions">';
+                    html += '<button type="button" class="button button-primary" onclick="applyColumnFilter(' + fieldId + ')">اعمال فیلتر</button>';
+                    html += '<button type="button" class="button" onclick="clearColumnFilter(' + fieldId + ')">پاک کردن</button>';
+                    html += '</div>';
+                    html += '</div>';
+                    
+                    document.getElementById('filterContent').innerHTML = html;
+                    document.getElementById('columnFilterModal').style.display = 'block';
+                }
+            }
+        });
+    }
+    
+    // پنهان کردن مودال فیلتر
+    function hideColumnFilterModal() {
+        document.getElementById('columnFilterModal').style.display = 'none';
+    }
+    
+    // به‌روزرسانی فیلتر ستونی
+    function updateColumnFilter(fieldId, checkbox) {
+        if (!workforceData.currentFilters[fieldId]) {
+            workforceData.currentFilters[fieldId] = [];
+        }
+        
+        var index = workforceData.currentFilters[fieldId].indexOf(checkbox.value);
+        if (checkbox.checked && index === -1) {
+            workforceData.currentFilters[fieldId].push(checkbox.value);
+        } else if (!checkbox.checked && index > -1) {
+            workforceData.currentFilters[fieldId].splice(index, 1);
+        }
+    }
+    
+    // اعمال فیلتر ستونی
+    function applyColumnFilter(fieldId) {
+        workforceData.currentPage = 1;
+        loadTableData();
+        hideColumnFilterModal();
+    }
+    
+    // پاک کردن فیلتر ستونی
+    function clearColumnFilter(fieldId) {
+        delete workforceData.currentFilters[fieldId];
+        workforceData.currentPage = 1;
+        loadTableData();
+        hideColumnFilterModal();
+    }
+    
+    // ثابت کردن ستون
+    function togglePinColumn(button) {
+        var th = button.closest('th');
+        var fieldId = th.dataset.fieldId;
+        
+        th.classList.toggle('pinned');
+        button.classList.toggle('pinned');
+        
+        var index = workforceData.pinnedColumns.indexOf(fieldId);
+        if (index === -1) {
+            workforceData.pinnedColumns.push(fieldId);
+        } else {
+            workforceData.pinnedColumns.splice(index, 1);
+        }
+    }
+    
+    // انتخاب همه ردیف‌ها
+    function toggleSelectAll(checkbox) {
+        var checkboxes = document.querySelectorAll('.row-checkbox');
+        checkboxes.forEach(function(cb) {
+            cb.checked = checkbox.checked;
+            var rowId = parseInt(cb.closest('tr').dataset.personnelId);
+            toggleRowSelection(rowId, cb);
+        });
+    }
+    
+    // انتخاب ردیف
+    function toggleRowSelection(rowId, checkbox) {
+        var index = workforceData.selectedRows.indexOf(rowId);
+        if (checkbox.checked && index === -1) {
+            workforceData.selectedRows.push(rowId);
+        } else if (!checkbox.checked && index > -1) {
+            workforceData.selectedRows.splice(index, 1);
+        }
+    }
+    
+    // ویرایش پرسنل
+    function editPersonnel(personnelId) {
+        workforceData.currentPersonnelId = personnelId;
+        showSideForm();
+        
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_personnel_form',
+                personnel_id: personnelId,
+                mode: 'edit',
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    document.getElementById('formTitle').textContent = 'ویرایش پرسنل';
+                    document.getElementById('sideFormBody').innerHTML = response.data.html;
+                    
+                    // فعال‌سازی datepicker
+                    jQuery('.jdatepicker').persianDatepicker({
+                        format: 'YYYY/MM/DD',
+                        observer: true,
+                        persianDigit: false
+                    });
+                    
+                    // بررسی قابلیت ناوبری
+                    checkNavigationButtons();
+                }
+            }
+        });
+    }
+    
+    // مشاهده پرسنل
+    function viewPersonnel(personnelId) {
+        workforceData.currentPersonnelId = personnelId;
+        showSideForm();
+        
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_personnel_form',
+                personnel_id: personnelId,
+                mode: 'view',
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    document.getElementById('formTitle').textContent = 'مشاهده پرسنل';
+                    document.getElementById('sideFormBody').innerHTML = response.data.html;
+                    checkNavigationButtons();
+                }
+            }
+        });
+    }
+    
+    // نمایش فرم سمت راست
+    function showSideForm() {
+        document.getElementById('sideForm').classList.add('active');
+    }
+    
+    // پنهان کردن فرم سمت راست
+    function hideSideForm() {
+        document.getElementById('sideForm').classList.remove('active');
+        workforceData.currentPersonnelId = null;
+    }
+    
+    // ناوبری بین رکوردها
+    function navigatePersonnel(direction) {
+        var rows = document.querySelectorAll('#tableBody tr[data-personnel-id]');
+        var currentIndex = -1;
+        
+        for (var i = 0; i < rows.length; i++) {
+            if (parseInt(rows[i].dataset.personnelId) === workforceData.currentPersonnelId) {
+                currentIndex = i;
+                break;
+            }
+        }
+        
+        if (direction === 'prev' && currentIndex > 0) {
+            var prevId = parseInt(rows[currentIndex - 1].dataset.personnelId);
+            editPersonnel(prevId);
+        } else if (direction === 'next' && currentIndex < rows.length - 1) {
+            var nextId = parseInt(rows[currentIndex + 1].dataset.personnelId);
+            editPersonnel(nextId);
+        }
+    }
+    
+    // بررسی دکمه‌های ناوبری
+    function checkNavigationButtons() {
+        var rows = document.querySelectorAll('#tableBody tr[data-personnel-id]');
+        var currentIndex = -1;
+        
+        for (var i = 0; i < rows.length; i++) {
+            if (parseInt(rows[i].dataset.personnelId) === workforceData.currentPersonnelId) {
+                currentIndex = i;
+                break;
+            }
+        }
+        
+        document.getElementById('prevBtn').disabled = currentIndex <= 0;
+        document.getElementById('nextBtn').disabled = currentIndex >= rows.length - 1;
+    }
+    
+    // ذخیره فرم ویرایش
+    function savePersonnelForm() {
+        var form = document.getElementById('sideFormBody').querySelector('form');
+        if (!form) return;
+        
+        var formData = new FormData(form);
+        formData.append('action', 'workforce_save_personnel');
+        formData.append('personnel_id', workforceData.currentPersonnelId);
+        formData.append('nonce', workforce_ajax.nonce);
+        
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.success) {
+                    alert('تغییرات با موفقیت ذخیره شد و برای تایید ارسال شد.');
+                    hideSideForm();
+                    loadTableData();
+                    updateMonitoringCards();
+                } else {
+                    alert('خطا: ' + response.data.message);
+                }
+            }
+        });
+    }
+    
+    // درخواست حذف پرسنل
+    function requestDeletePersonnel(personnelId) {
+        if (!confirm('آیا از حذف این پرسنل اطمینان دارید؟ این عمل نیاز به تایید مدیر سیستم دارد.')) {
+            return;
+        }
+        
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_request_delete_personnel',
+                personnel_id: personnelId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    alert('درخواست حذف با موفقیت ارسال شد و در انتظار تایید است.');
+                    loadTableData();
+                } else {
+                    alert('خطا: ' + response.data.message);
+                }
+            }
+        });
+    }
+    
+    // حذف چندین ردیف انتخاب شده
+    function deleteSelectedRows() {
+        if (workforceData.selectedRows.length === 0) {
+            alert('لطفا ابتدا ردیف‌هایی را برای حذف انتخاب کنید.');
+            return;
+        }
+        
+        if (!confirm('آیا از حذف ' + workforceData.selectedRows.length + ' ردیف انتخاب شده اطمینان دارید؟')) {
+            return;
+        }
+        
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_request_bulk_delete',
+                personnel_ids: workforceData.selectedRows,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    alert('درخواست حذف با موفقیت ارسال شد و در انتظار تایید است.');
+                    workforceData.selectedRows = [];
+                    document.getElementById('selectAll').checked = false;
+                    loadTableData();
+                } else {
+                    alert('خطا: ' + response.data.message);
+                }
+            }
+        });
+    }
+    
+    // نمایش مودال افزودن پرسنل
+    function showAddPersonnelModal() {
+        // بارگذاری فیلدهای اضافی
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_additional_fields',
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    document.getElementById('additionalFields').innerHTML = response.data.html;
+                    document.getElementById('addPersonnelModal').style.display = 'block';
+                    
+                    // فعال‌سازی datepicker
+                    jQuery('.jdatepicker').persianDatepicker({
+                        format: 'YYYY/MM/DD',
+                        observer: true,
+                        persianDigit: false
+                    });
+                }
+            }
+        });
+    }
+    
+    // پنهان کردن مودال افزودن پرسنل
+    function hideAddPersonnelModal() {
+        document.getElementById('addPersonnelModal').style.display = 'none';
+        document.getElementById('addPersonnelForm').reset();
+        document.getElementById('nationalCodeValidation').textContent = '';
+    }
+    
+    // ثبت فرم افزودن پرسنل
+    function submitAddPersonnelForm() {
+        var form = document.getElementById('addPersonnelForm');
+        if (!form.checkValidity()) {
+            alert('لطفا فیلدهای ضروری را پر کنید.');
+            return;
+        }
+        
+        var formData = new FormData(form);
+        formData.append('action', 'workforce_request_add_personnel');
+        formData.append('department_id', workforceData.departmentId);
+        formData.append('nonce', workforce_ajax.nonce);
+        
+        // اعتبارسنجی کدملی
+        var nationalCode = document.getElementById('new_national_code').value;
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_validate_national_code',
+                national_code: nationalCode,
+                department_id: workforceData.departmentId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    // ارسال فرم
+                    jQuery.ajax({
+                        url: workforce_ajax.ajax_url,
+                        type: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        success: function(addResponse) {
+                            if (addResponse.success) {
+                                alert('درخواست افزودن پرسنل با موفقیت ارسال شد و در انتظار تایید است.');
+                                hideAddPersonnelModal();
+                                loadTableData();
+                                updateMonitoringCards();
+                            } else {
+                                alert('خطا: ' + addResponse.data.message);
+                            }
+                        }
+                    });
+                } else {
+                    document.getElementById('nationalCodeValidation').textContent = response.data.message;
+                    document.getElementById('nationalCodeValidation').style.color = '#e74c3c';
+                }
+            }
+        });
+    }
+    
+    // خروجی اکسل
+    function exportToExcel() {
+        var params = {
+            action: 'workforce_export_excel',
+            department_id: workforceData.departmentId,
+            period_id: workforceData.periodId,
+            filters: workforceData.currentFilters,
+            search: workforceData.currentSearch,
+            nonce: workforce_ajax.nonce
+        };
+        
+        // ایجاد URL برای دانلود
+        var url = workforce_ajax.ajax_url + '?' + jQuery.param(params);
+        window.open(url, '_blank');
+    }
+    
+    // به‌روزرسانی داده‌ها
+    function refreshData() {
+        loadTableData();
+        updateMonitoringCards();
+        alert('داده‌ها با موفقیت به‌روزرسانی شدند.');
+    }
+    
+    // اسکرول به بالای جدول
+    function scrollToTableTop() {
+        var table = document.querySelector('.workforce-main-table');
+        if (table) {
+            table.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+    
+    // تنظیم event listeners
+    function setupEventListeners() {
+        // درگ و دراپ برای تغییر ترتیب ستون‌ها
+        var table = document.getElementById('personnelTable');
+        var headerCells = table.querySelectorAll('thead th');
+        
+        headerCells.forEach(function(cell, index) {
+            if (index < 2) return; // ستون‌های انتخاب و شماره ردیف
+            
+            cell.setAttribute('draggable', 'true');
+            
+            cell.addEventListener('dragstart', function(e) {
+                e.dataTransfer.setData('text/plain', index);
+                cell.classList.add('dragging');
+            });
+            
+            cell.addEventListener('dragend', function() {
+                cell.classList.remove('dragging');
+            });
+        });
+        
+        table.addEventListener('dragover', function(e) {
+            e.preventDefault();
+        });
+        
+        table.addEventListener('drop', function(e) {
+            e.preventDefault();
+            var fromIndex = e.dataTransfer.getData('text/plain');
+            var toCell = e.target.closest('th');
+            var toIndex = Array.from(headerCells).indexOf(toCell);
+            
+            if (fromIndex >= 2 && toIndex >= 2 && fromIndex !== toIndex) {
+                // تغییر ترتیب در آرایه fields
+                var field = workforceData.fields.splice(fromIndex - 2, 1)[0];
+                workforceData.fields.splice(toIndex - 2, 0, field);
+                
+                // بارگذاری مجدد جدول
+                loadTableData();
+            }
+        });
+        
+        // کلیک راست برای منو زمینه
+        table.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            var row = e.target.closest('tr[data-personnel-id]');
+            if (row) {
+                showContextMenu(e, parseInt(row.dataset.personnelId));
+            }
+        });
+        
+        // بستن منو زمینه با کلیک
+        document.addEventListener('click', function() {
+            var contextMenu = document.getElementById('contextMenu');
+            if (contextMenu) {
+                contextMenu.remove();
+            }
+        });
+    }
+    
+    // نمایش منو زمینه
+    function showContextMenu(e, personnelId) {
+        // حذف منوی قبلی
+        var oldMenu = document.getElementById('contextMenu');
+        if (oldMenu) oldMenu.remove();
+        
+        // ایجاد منوی جدید
+        var menu = document.createElement('div');
+        menu.id = 'contextMenu';
+        menu.className = 'context-menu';
+        menu.style.top = e.pageY + 'px';
+        menu.style.left = e.pageX + 'px';
+        
+        menu.innerHTML = `
+            <div class="menu-item" onclick="editPersonnel(${personnelId})">
+                <span class="menu-icon">✏️</span>
+                ویرایش
+            </div>
+            <div class="menu-item" onclick="viewPersonnel(${personnelId})">
+                <span class="menu-icon">👁️</span>
+                مشاهده
+            </div>
+            <div class="menu-item" onclick="requestDeletePersonnel(${personnelId})">
+                <span class="menu-icon">🗑️</span>
+                حذف
+            </div>
+            <div class="menu-separator"></div>
+            <div class="menu-item" onclick="copyPersonnelData(${personnelId})">
+                <span class="menu-icon">📋</span>
+                کپی اطلاعات
+            </div>
+        `;
+        
+        document.body.appendChild(menu);
+    }
+    
+    // کپی اطلاعات پرسنل
+    function copyPersonnelData(personnelId) {
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_personnel_data_text',
+                personnel_id: personnelId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    navigator.clipboard.writeText(response.data.text)
+                        .then(function() {
+                            alert('اطلاعات با موفقیت کپی شد.');
+                        })
+                        .catch(function() {
+                            alert('خطا در کپی اطلاعات.');
+                        });
+                }
+            }
+        });
+    }
+    
+    // تنظیم کلیدهای میانبر
+    function setupKeyboardShortcuts() {
+        document.addEventListener('keydown', function(e) {
+            // Ctrl + F: جستجو
+            if (e.ctrlKey && e.key === 'f') {
+                e.preventDefault();
+                document.getElementById('globalSearch').focus();
+            }
+            
+            // Ctrl + S: ذخیره (در فرم ویرایش)
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                if (workforceData.currentPersonnelId) {
+                    savePersonnelForm();
+                }
+            }
+            
+            // Ctrl + A: انتخاب همه
+            if (e.ctrlKey && e.key === 'a') {
+                e.preventDefault();
+                var checkbox = document.getElementById('selectAll');
+                checkbox.checked = !checkbox.checked;
+                toggleSelectAll(checkbox);
+            }
+            
+            // Escape: بستن فرم
+            if (e.key === 'Escape') {
+                hideSideForm();
+                hideAddPersonnelModal();
+                hideColumnFilterModal();
+            }
+            
+            // فلش‌های چپ و راست برای ناوبری
+            if (workforceData.currentPersonnelId) {
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    navigatePersonnel('prev');
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    navigatePersonnel('next');
+                }
+            }
+        });
+    }
+    </script>
     <?php
+    
     return ob_get_clean();
 }
 
 /**
- * فرم لاگین
+ * پنل مدیر سازمان
  */
-function wf_render_login_form() {
+function workforce_org_manager_panel($user_id) {
+    $current_user = wp_get_current_user();
+    $departments = workforce_get_all_departments();
+    $active_period = workforce_get_active_period();
+    $period_id = $active_period ? $active_period->id : null;
+    $fields = workforce_get_all_fields();
+    
     ob_start();
     ?>
-    <div class="wf-login-container">
-        <style>
-        .wf-login-container {
-            max-width: 400px;
-            margin: 100px auto;
-            padding: 40px;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
-        }
+    <div class="workforce-org-manager-panel" data-period-id="<?php echo esc_attr($period_id); ?>">
+        <!-- هدر هوشمند -->
+        <div class="workforce-header">
+            <div class="header-content">
+                <div class="welcome-section">
+                    <div class="welcome-icon">👑</div>
+                    <div class="welcome-text">
+                        <h2>خوش آمدید، <?php echo esc_html($current_user->display_name); ?></h2>
+                        <div class="welcome-details">
+                            <span class="detail-item">
+                                <span class="detail-icon">🏢</span>
+                                <span class="detail-text">مدیر سازمان</span>
+                            </span>
+                            <span class="detail-item">
+                                <span class="detail-icon">📅</span>
+                                <span class="detail-text">دوره: <?php echo $active_period ? esc_html($active_period->name) : 'تعیین نشده'; ?></span>
+                            </span>
+                            <span class="detail-item">
+                                <span class="detail-icon">🕒</span>
+                                <span class="detail-text">امروز: <?php echo esc_html(workforce_today_jalali()); ?></span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button type="button" class="button button-primary" onclick="showOrgReports()">
+                        <span class="action-icon">📈</span>
+                        گزارشات کلان
+                    </button>
+                    <button type="button" class="button button-secondary" onclick="exportOrgToExcel()">
+                        <span class="action-icon">📤</span>
+                        خروجی اکسل
+                    </button>
+                    <button type="button" class="button" onclick="refreshOrgData()">
+                        <span class="action-icon">🔄</span>
+                        به‌روزرسانی
+                    </button>
+                </div>
+            </div>
+        </div>
         
-        .wf-login-title {
-            text-align: center;
-            color: #1e40af;
-            margin-bottom: 30px;
-            font-size: 24px;
-        }
-        
-        .wf-login-form .wf-form-group {
-            margin-bottom: 20px;
-        }
-        
-        .wf-login-btn {
-            width: 100%;
-            padding: 15px;
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .wf-login-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
-        }
-        </style>
-        
-        <h2 class="wf-login-title">🔐 ورود به پنل مدیران</h2>
-        
-        <form class="wf-login-form" method="post">
-            <?php wp_nonce_field('wf_manager_login', 'wf_login_nonce'); ?>
-            
-            <div class="wf-form-group">
-                <label>نام کاربری</label>
-                <input type="text" name="wf_username" class="wf-form-input" required>
+        <!-- آمار سازمانی -->
+        <div class="workforce-org-stats">
+            <?php
+            $org_stats = workforce_get_org_manager_stats();
+            ?>
+            <div class="org-stat-card">
+                <div class="stat-icon">🏢</div>
+                <div class="stat-content">
+                    <h3>تعداد ادارات</h3>
+                    <p class="stat-number"><?php echo esc_html($org_stats['overall']['total_departments']); ?></p>
+                </div>
             </div>
             
-            <div class="wf-form-group">
-                <label>رمز عبور</label>
-                <input type="password" name="wf_password" class="wf-form-input" required>
+            <div class="org-stat-card">
+                <div class="stat-icon">👥</div>
+                <div class="stat-content">
+                    <h3>کل پرسنل</h3>
+                    <p class="stat-number"><?php echo esc_html($org_stats['overall']['total_personnel']); ?></p>
+                    <p class="stat-sub"><?php echo esc_html($org_stats['overall']['total_active']); ?> نفر فعال</p>
+                </div>
             </div>
             
-            <button type="submit" class="wf-login-btn">ورود به پنل</button>
-        </form>
-    </div>
-    <?php
-    return ob_get_clean();
-}
-
-/**
- * بررسی دسترسی مدیر
- */
-function wf_check_manager_access($user_id, $panel_type) {
-    $user_role = wf_get_user_role($user_id);
-    
-    if ($panel_type === 'department' && $user_role === 'department_manager') {
-        return true;
-    }
-    
-    if ($panel_type === 'organization' && $user_role === 'organization_manager') {
-        return true;
-    }
-    
-    // ادمین می‌تواند به هر دو پنل دسترسی داشته باشد
-    if (current_user_can('manage_options')) {
-        return true;
-    }
-    
-    return false;
-}
-
-/**
- * دریافت اطلاعات مدیر
- */
-function wf_get_manager_info($user_id, $panel_type) {
-    global $wpdb;
-    
-    $user = get_userdata($user_id);
-    $info = array(
-        'name' => $user->display_name,
-        'role' => wf_get_user_role($user_id),
-        'role_name' => '',
-        'department' => '',
-        'organization' => 'سازمان بنی اسد'
-    );
-    
-    // تعیین نام نقش
-    switch ($info['role']) {
-        case 'department_manager':
-            $info['role_name'] = 'مدیر اداره';
-            break;
-        case 'organization_manager':
-            $info['role_name'] = 'مدیر سازمان';
-            break;
-        case 'admin':
-            $info['role_name'] = 'مدیر کل سیستم';
-            break;
-    }
-    
-    // دریافت اطلاعات اداره برای مدیران اداره
-    if ($info['role'] === 'department_manager') {
-        $department = $wpdb->get_row($wpdb->prepare(
-            "SELECT name, color FROM {$wpdb->prefix}wf_departments 
-             WHERE manager_id = %d",
-            $user_id
+            <div class="org-stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-content">
+                    <h3>میانگین تکمیل</h3>
+                    <p class="stat-number"><?php echo esc_html($org_stats['overall']['avg_completion_rate']); ?>%</p>
+                    <p class="stat-sub">اطلاعات پرسنل</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- کارت‌های ادارات -->
+        <div class="workforce-dept-cards">
+            <h3>وضعیت ادارات</h3>
+            <div class="dept-cards-grid">
+                <?php foreach ($org_stats['departments'] as $dept): ?>
+                    <div class="dept-card" style="border-color: <?php echo esc_attr($dept['color']); ?>" onclick="showDeptDetails(<?php echo esc_attr($dept['id']); ?>)">
+                        <div class="dept-card-header">
+                            <div class="dept-color" style="background-color: <?php echo esc_attr($dept['color']); ?>"></div>
+                            <h4><?php echo esc_html($dept['name']); ?></h4>
+                        </div>
+                        <div class="dept-card-content">
+                            <div class="dept-stat">
+                                <span class="stat-label">پرسنل:</span>
+                                <span class="stat-value"><?php echo esc_html($dept['personnel_count']); ?></span>
+                            </div>
+                            <div class="dept-stat">
+                                <span class="stat-label">فعال:</span>
+                                <span class="stat-value"><?php echo esc_html($dept['active_count']); ?></span>
+                            </div>
+                            <div class="dept-stat">
+                                <span class="stat-label">تکمیل:</span>
+                                <span class="stat-value"><?php echo esc_html($dept['completion_rate']); ?>%</span>
+                            </div>
+                        </div>
+<div class="dept-card-footer">
+    <span class="dept-manager">
+        <?php
+        global $wpdb;
+        $managers_table = $wpdb->prefix . WF_TABLE_PREFIX . 'department_managers';
+        $users_table = $wpdb->users;
+        
+        $managers = $wpdb->get_results($wpdb->prepare(
+            "SELECT dm.is_primary, u.display_name 
+             FROM $managers_table dm 
+             INNER JOIN $users_table u ON dm.user_id = u.ID 
+             WHERE dm.department_id = %d 
+             ORDER BY dm.is_primary DESC 
+             LIMIT 1",
+            $dept['id']
         ));
         
-        if ($department) {
-            $info['department'] = $department->name;
+        if (!empty($managers)) {
+            $total = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $managers_table WHERE department_id = %d",
+                $dept['id']
+            ));
+            
+            echo '👤 ' . esc_html($managers[0]->display_name) . 
+                 ($total > 1 ? ' +' . ($total - 1) : '');
+        } else {
+            echo '👤 تعیین نشده';
         }
-    }
-    
-    return $info;
-}
-
-/**
- * بارگذاری داده‌های پرسنل
- */
-function wf_load_personnel_data($user_id, $panel_type, $period_id) {
-    global $wpdb;
-    
-    $table_name = $wpdb->prefix . 'wf_personnel';
-    $departments_table = $wpdb->prefix . 'wf_departments';
-    
-    $query = "SELECT p.*, d.name as department_name, d.color as department_color 
-              FROM {$table_name} p
-              LEFT JOIN {$departments_table} d ON p.department_id = d.id
-              WHERE p.period_id = %d";
-    
-    $params = array($period_id);
-    
-    // محدود کردن بر اساس اداره برای مدیران اداره
-    if ($panel_type === 'department') {
-        $department_id = wf_get_user_department($user_id);
-        if ($department_id) {
-            $query .= " AND p.department_id = %d";
-            $params[] = $department_id;
-        }
-    }
-    
-    $query .= " AND p.status = 'active' 
-                ORDER BY p.created_at DESC 
-                LIMIT 1000";
-    
-    $results = $wpdb->get_results($wpdb->prepare($query, $params), ARRAY_A);
-    
-    return $results ?: array();
-}
-
-/**
- * دریافت تمام فیلدها
- */
-function wf_get_all_fields() {
-    global $wpdb;
-    
-    $results = $wpdb->get_results(
-        "SELECT * FROM {$wpdb->prefix}wf_fields 
-         WHERE status = 'active' 
-         ORDER BY field_order ASC",
-        ARRAY_A
-    );
-    
-    return $results ?: array(
-        array(
-            'id' => 1,
-            'name' => 'national_id',
-            'title' => 'کد ملی',
-            'type' => 'text',
-            'required' => true,
-            'locked' => true,
-            'filterable' => true
-        ),
-        array(
-            'id' => 2,
-            'name' => 'name',
-            'title' => 'نام',
-            'type' => 'text',
-            'required' => true,
-            'locked' => false,
-            'filterable' => true
-        ),
-        array(
-            'id' => 3,
-            'name' => 'last_name',
-            'title' => 'نام خانوادگی',
-            'type' => 'text',
-            'required' => true,
-            'locked' => false,
-            'filterable' => true
-        ),
-        array(
-            'id' => 4,
-            'name' => 'department',
-            'title' => 'اداره',
-            'type' => 'text',
-            'required' => true,
-            'locked' => true,
-            'filterable' => true
-        ),
-        array(
-            'id' => 5,
-            'name' => 'salary',
-            'title' => 'حقوق',
-            'type' => 'decimal',
-            'required' => false,
-            'locked' => false,
-            'filterable' => true
-        )
-    );
-}
-
-/**
- * دریافت دوره فعال
- */
-function wf_get_active_period() {
-    global $wpdb;
-    
-    $result = $wpdb->get_row(
-        "SELECT * FROM {$wpdb->prefix}wf_periods 
-         WHERE status = 'active' 
-         ORDER BY start_date DESC 
-         LIMIT 1",
-        ARRAY_A
-    );
-    
-    return $result ?: array(
-        'id' => 1,
-        'title' => 'بهمن ۱۴۰۳',
-        'start_date' => '2025-01-21',
-        'end_date' => '2025-02-19',
-        'status' => 'active'
-    );
-}
-
-/**
- * دریافت اداره کاربر
- */
-function wf_get_user_department($user_id) {
-    global $wpdb;
-    
-    $result = $wpdb->get_var($wpdb->prepare(
-        "SELECT id FROM {$wpdb->prefix}wf_departments 
-         WHERE manager_id = %d",
-        $user_id
-    ));
-    
-    return $result;
-}
-
-/**
- * نمایش پیام عدم دسترسی
- */
-function wf_render_access_denied() {
-    ob_start();
-    ?>
-    <div class="wf-access-denied">
-        <style>
-        .wf-access-denied {
-            text-align: center;
-            padding: 100px 20px;
-        }
+        ?>
+    </span>
+</div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
         
-        .wf-access-icon {
-            font-size: 80px;
-            margin-bottom: 20px;
-            color: #ef4444;
-        }
+        <!-- جدول تجمیعی -->
+        <div class="workforce-org-table">
+            <h3>اطلاعات تجمیعی همه ادارات</h3>
+            
+            <div class="table-toolbar">
+                <div class="toolbar-left">
+                    <div class="filter-group">
+                        <label>فیلتر اداره:</label>
+                        <select id="orgDeptFilter" onchange="filterOrgTable()">
+                            <option value="all">همه ادارات</option>
+                            <?php foreach ($departments as $dept): ?>
+                                <option value="<?php echo esc_attr($dept->id); ?>"><?php echo esc_html($dept->name); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>فیلتر وضعیت:</label>
+                        <select id="orgStatusFilter" onchange="filterOrgTable()">
+                            <option value="all">همه</option>
+                            <option value="active">فعال</option>
+                            <option value="inactive">غیرفعال</option>
+                            <option value="suspended">تعلیق</option>
+                            <option value="retired">بازنشسته</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="toolbar-right">
+                    <div class="search-box">
+                        <input type="text" id="orgGlobalSearch" placeholder="جستجو..." onkeyup="searchOrgTable()">
+                        <span class="search-icon">🔍</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="table-container">
+                <table class="workforce-data-table" id="orgPersonnelTable">
+                    <thead>
+                        <tr>
+                            <th class="row-number">ردیف</th>
+                            <th class="dept-col">نام اداره</th>
+                            <th>کدملی</th>
+                            <th>نام و نام خانوادگی</th>
+                            <th>تاریخ استخدام</th>
+                            <th>نوع استخدام</th>
+                            <th>وضعیت</th>
+                            <th>عملیات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orgTableBody">
+                        <!-- داده‌ها از طریق AJAX بارگذاری می‌شوند -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="table-pagination">
+                <div class="pagination-info" id="orgPaginationInfo"></div>
+                <div class="pagination-controls">
+                    <button type="button" class="pagination-btn" onclick="goToOrgPage(1)" disabled id="orgFirstPage">اولین</button>
+                    <button type="button" class="pagination-btn" onclick="goToOrgPreviousPage()" disabled id="orgPrevPage">قبلی</button>
+                    
+                    <div class="page-numbers" id="orgPageNumbers"></div>
+                    
+                    <button type="button" class="pagination-btn" onclick="goToOrgNextPage()" disabled id="orgNextPage">بعدی</button>
+                    <button type="button" class="pagination-btn" onclick="goToOrgLastPage()" disabled id="orgLastPage">آخرین</button>
+                </div>
+            </div>
+        </div>
         
-        .wf-access-title {
-            font-size: 24px;
-            color: #1f2937;
-            margin-bottom: 10px;
-        }
-        
-        .wf-access-message {
-            color: #6b7280;
-            margin-bottom: 30px;
-        }
-        </style>
-        
-        <div class="wf-access-icon">🚫</div>
-        <h2 class="wf-access-title">دسترسی غیرمجاز</h2>
-        <p class="wf-access-message">
-            شما مجوز دسترسی به این بخش را ندارید.
-        </p>
-        <a href="<?php echo home_url(); ?>" class="wf-btn wf-btn-primary">
-            بازگشت به صفحه اصلی
-        </a>
+        <!-- مودال گزارشات -->
+        <div id="orgReportsModal" class="workforce-modal">
+            <div class="workforce-modal-content wide-modal">
+                <div class="workforce-modal-header">
+                    <h2>گزارشات کلان سازمان</h2>
+                    <span class="workforce-modal-close" onclick="hideOrgReportsModal()">&times;</span>
+                </div>
+                <div class="workforce-modal-body">
+                    <div class="report-tabs">
+                        <button type="button" class="report-tab active" onclick="showReportTab('comparison')">مقایسه ادارات</button>
+                        <button type="button" class="report-tab" onclick="showReportTab('monthly')">روند ماهانه</button>
+                        <button type="button" class="report-tab" onclick="showReportTab('analysis')">تحلیل آماری</button>
+                    </div>
+                    
+                    <div class="report-content">
+                        <div id="comparisonReport" class="report-tab-content active">
+                            <h3>مقایسه عملکرد ادارات</h3>
+                            <div id="comparisonChart"></div>
+                        </div>
+                        
+                        <div id="monthlyReport" class="report-tab-content">
+                            <h3>روند تغییرات ماهانه</h3>
+                            <div id="monthlyChart"></div>
+                        </div>
+                        
+                        <div id="analysisReport" class="report-tab-content">
+                            <h3>تحلیل آماری سازمان</h3>
+                            <div id="analysisStats"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
+    
+    <script>
+    // داده‌های سازمانی
+    var orgData = {
+        currentPage: 1,
+        recordsPerPage: 25,
+        totalRecords: 0,
+        totalPages: 0,
+        currentDeptFilter: 'all',
+        currentStatusFilter: 'all',
+        currentSearch: '',
+        departments: <?php echo json_encode($departments); ?>
+    };
+    
+    // بارگذاری اولیه
+    document.addEventListener('DOMContentLoaded', function() {
+        loadOrgTableData();
+    });
+    
+    // بارگذاری داده‌های جدول سازمانی
+    function loadOrgTableData() {
+        var params = {
+            action: 'workforce_get_org_table_data',
+            department_id: orgData.currentDeptFilter === 'all' ? '' : orgData.currentDeptFilter,
+            status: orgData.currentStatusFilter === 'all' ? '' : orgData.currentStatusFilter,
+            search: orgData.currentSearch,
+            page: orgData.currentPage,
+            per_page: orgData.recordsPerPage,
+            nonce: workforce_ajax.nonce
+        };
+        
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: params,
+            success: function(response) {
+                if (response.success) {
+                    renderOrgTable(response.data);
+                    updateOrgPagination(response.data.pagination);
+                    updateOrgRecordCounter(response.data.pagination);
+                }
+            }
+        });
+    }
+    
+    // رندر جدول سازمانی
+    function renderOrgTable(data) {
+        var tbody = document.getElementById('orgTableBody');
+        tbody.innerHTML = '';
+        
+        if (data.rows.length === 0) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td colspan="8" class="no-data">داده‌ای یافت نشد.</td>';
+            tbody.appendChild(tr);
+            return;
+        }
+        
+        data.rows.forEach(function(row, index) {
+            var tr = document.createElement('tr');
+            
+            // شماره ردیف
+            var tdNumber = document.createElement('td');
+            tdNumber.className = 'row-number';
+            tdNumber.textContent = ((orgData.currentPage - 1) * orgData.recordsPerPage) + index + 1;
+            tr.appendChild(tdNumber);
+            
+            // نام اداره
+            var tdDept = document.createElement('td');
+            tdDept.className = 'dept-col';
+            tdDept.innerHTML = '<span class="dept-badge" style="background-color: ' + row.department_color + '">' + row.department_name + '</span>';
+            tr.appendChild(tdDept);
+            
+            // کدملی
+            var tdNationalCode = document.createElement('td');
+            tdNationalCode.textContent = row.national_code;
+            tr.appendChild(tdNationalCode);
+            
+            // نام و نام خانوادگی
+            var tdName = document.createElement('td');
+            tdName.innerHTML = '<strong>' + row.first_name + ' ' + row.last_name + '</strong>';
+            tr.appendChild(tdName);
+            
+            // تاریخ استخدام
+            var tdEmploymentDate = document.createElement('td');
+            tdEmploymentDate.textContent = row.employment_date;
+            tr.appendChild(tdEmploymentDate);
+            
+            // نوع استخدام
+            var tdEmploymentType = document.createElement('td');
+            tdEmploymentType.textContent = getEmploymentTypeLabel(row.employment_type);
+            tr.appendChild(tdEmploymentType);
+            
+            // وضعیت
+            var tdStatus = document.createElement('td');
+            tdStatus.innerHTML = getStatusBadge(row.status);
+            tr.appendChild(tdStatus);
+            
+            // عملیات
+            var tdActions = document.createElement('td');
+            tdActions.className = 'actions-col';
+            tdActions.innerHTML = `
+                <button type="button" class="action-btn view-btn" onclick="viewOrgPersonnel(${row.id})" title="مشاهده">
+                    👁️
+                </button>
+                <button type="button" class="action-btn chart-btn" onclick="showPersonnelChart(${row.id})" title="نمودار">
+                    📈
+                </button>
+            `;
+            tr.appendChild(tdActions);
+            
+            tbody.appendChild(tr);
+        });
+    }
+    
+    // برچسب نوع استخدام
+    function getEmploymentTypeLabel(type) {
+        var labels = {
+            'permanent': 'دائمی',
+            'contract': 'پیمانی',
+            'temporary': 'موقت',
+            'project': 'پروژه‌ای'
+        };
+        return labels[type] || type;
+    }
+    
+    // نشان وضعیت
+    function getStatusBadge(status) {
+        var badges = {
+            'active': '<span class="status-badge status-active">فعال</span>',
+            'inactive': '<span class="status-badge status-inactive">غیرفعال</span>',
+            'suspended': '<span class="status-badge status-suspended">تعلیق</span>',
+            'retired': '<span class="status-badge status-retired">بازنشسته</span>'
+        };
+        return badges[status] || status;
+    }
+    
+    // فیلتر جدول سازمانی
+    function filterOrgTable() {
+        orgData.currentDeptFilter = document.getElementById('orgDeptFilter').value;
+        orgData.currentStatusFilter = document.getElementById('orgStatusFilter').value;
+        orgData.currentPage = 1;
+        loadOrgTableData();
+    }
+    
+    // جستجو در جدول سازمانی
+    function searchOrgTable() {
+        orgData.currentSearch = document.getElementById('orgGlobalSearch').value;
+        orgData.currentPage = 1;
+        loadOrgTableData();
+    }
+    
+    // صفحه‌بندی جدول سازمانی
+    function updateOrgPagination(pagination) {
+        orgData.totalRecords = pagination.total_records;
+        orgData.totalPages = pagination.total_pages;
+        
+        var firstBtn = document.getElementById('orgFirstPage');
+        var prevBtn = document.getElementById('orgPrevPage');
+        var nextBtn = document.getElementById('orgNextPage');
+        var lastBtn = document.getElementById('orgLastPage');
+        
+        firstBtn.disabled = orgData.currentPage === 1;
+        prevBtn.disabled = orgData.currentPage === 1;
+        nextBtn.disabled = orgData.currentPage === orgData.totalPages;
+        lastBtn.disabled = orgData.currentPage === orgData.totalPages;
+        
+        // شماره صفحات
+        var pageNumbers = document.getElementById('orgPageNumbers');
+        pageNumbers.innerHTML = '';
+        
+        var startPage = Math.max(1, orgData.currentPage - 2);
+        var endPage = Math.min(orgData.totalPages, startPage + 4);
+        
+        if (endPage - startPage < 4) {
+            startPage = Math.max(1, endPage - 4);
+        }
+        
+        for (var i = startPage; i <= endPage; i++) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'page-number-btn';
+            if (i === orgData.currentPage) {
+                btn.classList.add('active');
+            }
+            btn.textContent = i;
+            btn.onclick = function() {
+                goToOrgPage(parseInt(this.textContent));
+            };
+            pageNumbers.appendChild(btn);
+        }
+    }
+    
+    function updateOrgRecordCounter(pagination) {
+        var start = ((orgData.currentPage - 1) * orgData.recordsPerPage) + 1;
+        var end = Math.min(orgData.currentPage * orgData.recordsPerPage, pagination.total_records);
+        var counter = document.getElementById('orgPaginationInfo');
+        counter.textContent = 'نمایش ' + start + '-' + end + ' از ' + pagination.total_records + ' رکورد';
+    }
+    
+    function goToOrgPage(page) {
+        if (page >= 1 && page <= orgData.totalPages) {
+            orgData.currentPage = page;
+            loadOrgTableData();
+        }
+    }
+    
+    function goToOrgPreviousPage() {
+        if (orgData.currentPage > 1) {
+            goToOrgPage(orgData.currentPage - 1);
+        }
+    }
+    
+    function goToOrgNextPage() {
+        if (orgData.currentPage < orgData.totalPages) {
+            goToOrgPage(orgData.currentPage + 1);
+        }
+    }
+    
+    function goToOrgFirstPage() {
+        goToOrgPage(1);
+    }
+    
+    function goToOrgLastPage() {
+        goToOrgPage(orgData.totalPages);
+    }
+    
+    // مشاهده پرسنل در سطح سازمان
+    function viewOrgPersonnel(personnelId) {
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_view_org_personnel',
+                personnel_id: personnelId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    // نمایش در مودال
+                    alert('مشاهده پرسنل - این بخش نیاز به پیاده‌سازی دارد.');
+                }
+            }
+        });
+    }
+    
+    // نمایش نمودار پرسنل
+    function showPersonnelChart(personnelId) {
+        // پیاده‌سازی نمودار
+        alert('نمودار پرسنل - این بخش نیاز به پیاده‌سازی دارد.');
+    }
+    
+    // نمایش جزئیات اداره
+    function showDeptDetails(deptId) {
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_dept_details',
+                department_id: deptId,
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    // نمایش در مودال
+                    alert('جزئیات اداره - این بخش نیاز به پیاده‌سازی دارد.');
+                }
+            }
+        });
+    }
+    
+    // نمایش گزارشات سازمان
+    function showOrgReports() {
+        document.getElementById('orgReportsModal').style.display = 'block';
+        loadComparisonReport();
+    }
+    
+    function hideOrgReportsModal() {
+        document.getElementById('orgReportsModal').style.display = 'none';
+    }
+    
+    function showReportTab(tabName) {
+        // حذف کلاس active از همه تب‌ها
+        document.querySelectorAll('.report-tab').forEach(function(tab) {
+            tab.classList.remove('active');
+        });
+        
+        document.querySelectorAll('.report-tab-content').forEach(function(content) {
+            content.classList.remove('active');
+        });
+        
+        // افزودن کلاس active به تب انتخاب شده
+        event.target.classList.add('active');
+        document.getElementById(tabName + 'Report').classList.add('active');
+        
+        // بارگذاری گزارش مربوطه
+        if (tabName === 'comparison') {
+            loadComparisonReport();
+        } else if (tabName === 'monthly') {
+            loadMonthlyReport();
+        } else if (tabName === 'analysis') {
+            loadAnalysisReport();
+        }
+    }
+    
+    function loadComparisonReport() {
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_comparison_report',
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    // ایجاد نمودار مقایسه
+                    createComparisonChart(response.data);
+                }
+            }
+        });
+    }
+    
+    function loadMonthlyReport() {
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_monthly_report',
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    // ایجاد نمودار روند ماهانه
+                    createMonthlyChart(response.data);
+                }
+            }
+        });
+    }
+    
+    function loadAnalysisReport() {
+        jQuery.ajax({
+            url: workforce_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'workforce_get_analysis_report',
+                nonce: workforce_ajax.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    // نمایش آمار تحلیلی
+                    document.getElementById('analysisStats').innerHTML = response.data.html;
+                }
+            }
+        });
+    }
+    
+    function createComparisonChart(data) {
+        // پیاده‌سازی نمودار با Chart.js یا کتابخانه دیگر
+        var ctx = document.getElementById('comparisonChart').getContext('2d');
+        // کد ایجاد نمودار
+    }
+    
+    function createMonthlyChart(data) {
+        // پیاده‌سازی نمودار با Chart.js یا کتابخانه دیگر
+        var ctx = document.getElementById('monthlyChart').getContext('2d');
+        // کد ایجاد نمودار
+    }
+    
+    // خروجی اکسل سازمانی
+    function exportOrgToExcel() {
+        var params = {
+            action: 'workforce_export_org_excel',
+            department_id: orgData.currentDeptFilter === 'all' ? '' : orgData.currentDeptFilter,
+            status: orgData.currentStatusFilter === 'all' ? '' : orgData.currentStatusFilter,
+            search: orgData.currentSearch,
+            nonce: workforce_ajax.nonce
+        };
+        
+        var url = workforce_ajax.ajax_url + '?' + jQuery.param(params);
+        window.open(url, '_blank');
+    }
+    
+    // به‌روزرسانی داده‌های سازمانی
+    function refreshOrgData() {
+        loadOrgTableData();
+        alert('داده‌های سازمانی با موفقیت به‌روزرسانی شدند.');
+    }
+    </script>
     <?php
+    
     return ob_get_clean();
 }
 
-// پایان فایل
+/**
+ * هندلرهای AJAX برای پنل مدیران
+ */
+function workforce_ajax_get_table_data() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $department_id = intval($_POST['department_id']);
+    $period_id = isset($_POST['period_id']) ? intval($_POST['period_id']) : null;
+    $page = intval($_POST['page']) ?: 1;
+    $per_page = intval($_POST['per_page']) ?: 25;
+    $filters = isset($_POST['filters']) ? (array) $_POST['filters'] : [];
+    $search = sanitize_text_field($_POST['search'] ?? '');
+    
+    $offset = ($page - 1) * $per_page;
+    
+    global $wpdb;
+    $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+    $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+    $fields_table = $wpdb->prefix . WF_TABLE_PREFIX . 'fields';
+    
+    // ساختن کوئری اصلی
+    $query = "SELECT p.* FROM $personnel_table p WHERE p.department_id = %d AND p.is_deleted = 0";
+    $params = [$department_id];
+    
+    // اعمال فیلترهای وضعیت و نوع استخدام
+    if (!empty($filters)) {
+        foreach ($filters as $field_id => $values) {
+            if ($field_id === 'status') {
+                $query .= " AND p.status = %s";
+                $params[] = $values;
+            } elseif ($field_id === 'employment_type') {
+                $query .= " AND p.employment_type = %s";
+                $params[] = $values;
+            }
+        }
+    }
+    
+    // اعمال جستجوی سراسری
+    if (!empty($search)) {
+        $query .= " AND (p.first_name LIKE %s OR p.last_name LIKE %s OR p.national_code LIKE %s)";
+        $search_term = '%' . $wpdb->esc_like($search) . '%';
+        $params[] = $search_term;
+        $params[] = $search_term;
+        $params[] = $search_term;
+    }
+    
+    // گرفتن تعداد کل
+    $count_query = "SELECT COUNT(*) FROM ($query) as count_query";
+    $total_records = $wpdb->get_var($wpdb->prepare($count_query, $params));
+    
+    // اعمال محدودیت و مرتب‌سازی
+    $query .= " ORDER BY p.last_name ASC, p.first_name ASC LIMIT %d OFFSET %d";
+    $params[] = $per_page;
+    $params[] = $offset;
+    
+    $personnel = $wpdb->get_results($wpdb->prepare($query, $params));
+    
+    // اضافه کردن داده‌های متا
+    $fields = workforce_get_all_fields();
+    foreach ($personnel as &$person) {
+        $person->meta = [];
+        foreach ($fields as $field) {
+            $value = workforce_get_personnel_field_value($person->id, $field->field_name, $period_id);
+            $person->meta[$field->id] = $value;
+            $person->meta[$field->field_name] = $value;
+        }
+    }
+    
+    // محاسبه صفحه‌بندی
+    $total_pages = ceil($total_records / $per_page);
+    
+    $response = [
+        'rows' => $personnel,
+        'pagination' => [
+            'total_records' => $total_records,
+            'total_pages' => $total_pages,
+            'current_page' => $page,
+            'per_page' => $per_page
+        ]
+    ];
+    
+    wp_send_json_success($response);
+}
+add_action('wp_ajax_workforce_get_table_data', 'workforce_ajax_get_table_data');
+
+function workforce_ajax_get_department_stats() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $department_id = intval($_POST['department_id']);
+    
+    global $wpdb;
+    $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+    $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+    $fields_table = $wpdb->prefix . WF_TABLE_PREFIX . 'fields';
+    
+    // تعداد کل پرسنل
+    $total_personnel = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $personnel_table WHERE department_id = %d AND is_deleted = 0",
+        $department_id
+    ));
+    
+    // تعداد پرسنل فعال
+    $active_personnel = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $personnel_table WHERE department_id = %d AND status = 'active' AND is_deleted = 0",
+        $department_id
+    ));
+    
+    // درصد تکمیل فیلدهای ضروری
+    $required_fields = $wpdb->get_results(
+        "SELECT id, field_name FROM $fields_table WHERE is_required = 1"
+    );
+    
+    $completed_count = 0;
+    $total_required = count($required_fields) * $total_personnel;
+    
+    if ($total_required > 0) {
+        foreach ($required_fields as $field) {
+            $completed = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(DISTINCT pm.personnel_id) 
+                 FROM $meta_table pm 
+                 INNER JOIN $personnel_table p ON pm.personnel_id = p.id 
+                 WHERE p.department_id = %d AND p.is_deleted = 0 
+                 AND pm.meta_key = %s AND pm.meta_value != ''",
+                $department_id, $field->field_name
+            ));
+            $completed_count += $completed;
+        }
+        
+        $completion_rate = round(($completed_count / $total_required) * 100, 2);
+    } else {
+        $completion_rate = 0;
+    }
+    
+    // تعداد اطلاعات ناقص
+    $incomplete_count = $total_required - $completed_count;
+    
+    $response = [
+        'total_personnel' => $total_personnel,
+        'active_personnel' => $active_personnel,
+        'completion_rate' => $completion_rate,
+        'incomplete_count' => $incomplete_count
+    ];
+    
+    wp_send_json_success($response);
+}
+add_action('wp_ajax_workforce_get_department_stats', 'workforce_ajax_get_department_stats');
+
+function workforce_ajax_get_field_stats() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $field_id = intval($_POST['field_id']);
+    $department_id = intval($_POST['department_id']);
+    $period_id = isset($_POST['period_id']) ? intval($_POST['period_id']) : null;
+    
+    $field = workforce_get_field($field_id);
+    if (!$field) {
+        wp_send_json_error(['message' => 'فیلد یافت نشد.']);
+    }
+    
+    global $wpdb;
+    $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+    $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+    
+    // محاسبه مجموع یا تعداد بر اساس نوع فیلد
+    if (in_array($field->field_type, ['number', 'decimal'])) {
+        // برای فیلدهای عددی: مجموع
+        $query = "SELECT SUM(CAST(pm.meta_value AS DECIMAL(10,2))) as total 
+                  FROM $meta_table pm 
+                  INNER JOIN $personnel_table p ON pm.personnel_id = p.id 
+                  WHERE p.department_id = %d AND p.is_deleted = 0 
+                  AND pm.meta_key = %s";
+        $params = [$department_id, $field->field_name];
+        
+        if ($period_id) {
+            $query .= " AND pm.period_id = %d";
+            $params[] = $period_id;
+        } else {
+            $query .= " AND pm.period_id IS NULL";
+        }
+        
+        $total = $wpdb->get_var($wpdb->prepare($query, $params)) ?: 0;
+    } else {
+        // برای سایر فیلدها: تعداد مقادیر غیرخالی
+        $query = "SELECT COUNT(*) as total 
+                  FROM $meta_table pm 
+                  INNER JOIN $personnel_table p ON pm.personnel_id = p.id 
+                  WHERE p.department_id = %d AND p.is_deleted = 0 
+                  AND pm.meta_key = %s AND pm.meta_value != ''";
+        $params = [$department_id, $field->field_name];
+        
+        if ($period_id) {
+            $query .= " AND pm.period_id = %d";
+            $params[] = $period_id;
+        } else {
+            $query .= " AND pm.period_id IS NULL";
+        }
+        
+        $total = $wpdb->get_var($wpdb->prepare($query, $params)) ?: 0;
+    }
+    
+    wp_send_json_success(['total' => $total]);
+}
+add_action('wp_ajax_workforce_get_field_stats', 'workforce_ajax_get_field_stats');
+
+function workforce_ajax_get_unique_values() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $field_id = intval($_POST['field_id']);
+    $department_id = intval($_POST['department_id']);
+    $period_id = isset($_POST['period_id']) ? intval($_POST['period_id']) : null;
+    
+    $field = workforce_get_field($field_id);
+    if (!$field) {
+        wp_send_json_error(['message' => 'فیلد یافت نشد.']);
+    }
+    
+    global $wpdb;
+    $meta_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel_meta';
+    $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+    
+    $query = "SELECT DISTINCT pm.meta_value 
+              FROM $meta_table pm 
+              INNER JOIN $personnel_table p ON pm.personnel_id = p.id 
+              WHERE p.department_id = %d AND p.is_deleted = 0 
+              AND pm.meta_key = %s";
+    $params = [$department_id, $field->field_name];
+    
+    if ($period_id) {
+        $query .= " AND pm.period_id = %d";
+        $params[] = $period_id;
+    } else {
+        $query .= " AND pm.period_id IS NULL";
+    }
+    
+    $query .= " ORDER BY pm.meta_value ASC";
+    
+    $results = $wpdb->get_col($wpdb->prepare($query, $params));
+    
+    wp_send_json_success(['values' => $results]);
+}
+add_action('wp_ajax_workforce_get_unique_values', 'workforce_ajax_get_unique_values');
+
+function workforce_ajax_get_personnel_form() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $personnel_id = intval($_POST['personnel_id']);
+    $mode = $_POST['mode'] ?? 'view';
+    $personnel = workforce_get_personnel($personnel_id);
+    
+    if (!$personnel) {
+        wp_send_json_error(['message' => 'پرسنل یافت نشد.']);
+    }
+    
+    $department = workforce_get_department($personnel->department_id);
+    $fields = workforce_get_all_fields();
+    $meta = workforce_get_personnel_meta($personnel_id);
+    $active_period = workforce_get_active_period();
+    
+    ob_start();
+    ?>
+    <form id="personnelEditForm">
+        <input type="hidden" name="personnel_id" value="<?php echo esc_attr($personnel->id); ?>">
+        
+        <div class="form-sections">
+            <div class="form-section">
+                <h4>اطلاعات پایه</h4>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="edit_national_code">کدملی</label>
+                        <input type="text" id="edit_national_code" name="national_code" 
+                               value="<?php echo esc_attr($personnel->national_code); ?>"
+                               <?php echo $mode === 'view' ? 'disabled' : ''; ?>>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit_first_name">نام</label>
+                        <input type="text" id="edit_first_name" name="first_name" 
+                               value="<?php echo esc_attr($personnel->first_name); ?>"
+                               <?php echo $mode === 'view' ? 'disabled' : ''; ?>>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit_last_name">نام خانوادگی</label>
+                        <input type="text" id="edit_last_name" name="last_name" 
+                               value="<?php echo esc_attr($personnel->last_name); ?>"
+                               <?php echo $mode === 'view' ? 'disabled' : ''; ?>>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit_employment_date">تاریخ استخدام</label>
+                        <input type="text" id="edit_employment_date" name="employment_date" 
+                               class="jdatepicker" value="<?php echo esc_attr($personnel->employment_date); ?>"
+                               <?php echo $mode === 'view' ? 'disabled' : ''; ?>>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit_employment_type">نوع استخدام</label>
+                        <select id="edit_employment_type" name="employment_type" 
+                                <?php echo $mode === 'view' ? 'disabled' : ''; ?>>
+                            <option value="permanent" <?php selected($personnel->employment_type, 'permanent'); ?>>دائمی</option>
+                            <option value="contract" <?php selected($personnel->employment_type, 'contract'); ?>>پیمانی</option>
+                            <option value="temporary" <?php selected($personnel->employment_type, 'temporary'); ?>>موقت</option>
+                            <option value="project" <?php selected($personnel->employment_type, 'project'); ?>>پروژه‌ای</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit_status">وضعیت</label>
+                        <select id="edit_status" name="status" 
+                                <?php echo $mode === 'view' ? 'disabled' : ''; ?>>
+                            <option value="active" <?php selected($personnel->status, 'active'); ?>>فعال</option>
+                            <option value="inactive" <?php selected($personnel->status, 'inactive'); ?>>غیرفعال</option>
+                            <option value="suspended" <?php selected($personnel->status, 'suspended'); ?>>تعلیق</option>
+                            <option value="retired" <?php selected($personnel->status, 'retired'); ?>>بازنشسته</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-section">
+                <h4>اطلاعات تکمیلی - دوره: <?php echo $active_period ? esc_html($active_period->name) : 'بدون دوره'; ?></h4>
+                <div class="form-grid">
+                    <?php foreach ($fields as $field): ?>
+                        <?php if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])): ?>
+                            <?php
+                            $value = $meta[$field->id] ?? $meta[$field->field_name] ?? '';
+                            $required = $field->is_required ? ' required' : '';
+                            $disabled = ($field->is_locked || $mode === 'view') ? ' disabled' : '';
+                            ?>
+                            <div class="form-group">
+                                <label for="edit_field_<?php echo esc_attr($field->id); ?>">
+                                    <?php echo esc_html($field->field_label); ?>
+                                    <?php if ($field->is_required): ?><span class="required">*</span><?php endif; ?>
+                                    <?php if ($field->is_locked): ?><span title="قفل شده">🔒</span><?php endif; ?>
+                                </label>
+                                
+                                <?php if ($field->field_type === 'select' && $field->options): ?>
+                                    <select id="edit_field_<?php echo esc_attr($field->id); ?>" 
+                                            name="field_<?php echo esc_attr($field->id); ?>"
+                                            class="<?php echo $required . $disabled; ?>">
+                                        <option value="">انتخاب کنید</option>
+                                        <?php foreach ($field->options as $option): ?>
+                                            <option value="<?php echo esc_attr($option); ?>" 
+                                                <?php selected($value, $option); ?>>
+                                                <?php echo esc_html($option); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                <?php elseif ($field->field_type === 'date'): ?>
+                                    <input type="text" id="edit_field_<?php echo esc_attr($field->id); ?>" 
+                                           name="field_<?php echo esc_attr($field->id); ?>"
+                                           class="jdatepicker<?php echo $required . $disabled; ?>"
+                                           value="<?php echo esc_attr($value); ?>">
+                                <?php elseif ($field->field_type === 'checkbox'): ?>
+                                    <input type="checkbox" id="edit_field_<?php echo esc_attr($field->id); ?>" 
+                                           name="field_<?php echo esc_attr($field->id); ?>"
+                                           value="1" <?php checked($value, '1'); echo $disabled; ?>>
+                                <?php else: ?>
+                                    <input type="<?php echo $field->field_type === 'number' ? 'number' : 'text'; ?>" 
+                                           id="edit_field_<?php echo esc_attr($field->id); ?>" 
+                                           name="field_<?php echo esc_attr($field->id); ?>"
+                                           class="<?php echo $required . $disabled; ?>"
+                                           value="<?php echo esc_attr($value); ?>"
+                                           <?php echo $field->field_type === 'number' ? 'step="0.01"' : ''; ?>>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+    </form>
+    <?php
+    
+    $html = ob_get_clean();
+    wp_send_json_success(['html' => $html]);
+}
+add_action('wp_ajax_workforce_get_personnel_form', 'workforce_ajax_get_personnel_form');
+
+function workforce_ajax_save_personnel() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $personnel_id = intval($_POST['personnel_id']);
+    $current_user_id = get_current_user_id();
+    
+    // گرفتن اطلاعات فعلی برای مقایسه
+    $personnel = workforce_get_personnel($personnel_id);
+    if (!$personnel) {
+        wp_send_json_error(['message' => 'پرسنل یافت نشد.']);
+    }
+    
+    $data_before = [
+        'national_code' => $personnel->national_code,
+        'first_name' => $personnel->first_name,
+        'last_name' => $personnel->last_name,
+        'employment_date' => $personnel->employment_date,
+        'employment_type' => $personnel->employment_type,
+        'status' => $personnel->status,
+        'meta' => workforce_get_personnel_meta($personnel_id)
+    ];
+    
+    // آماده‌سازی اطلاعات جدید
+    $data_after = [
+        'national_code' => sanitize_text_field($_POST['national_code'] ?? $personnel->national_code),
+        'first_name' => sanitize_text_field($_POST['first_name'] ?? $personnel->first_name),
+        'last_name' => sanitize_text_field($_POST['last_name'] ?? $personnel->last_name),
+        'employment_date' => sanitize_text_field($_POST['employment_date'] ?? $personnel->employment_date),
+        'employment_type' => sanitize_text_field($_POST['employment_type'] ?? $personnel->employment_type),
+        'status' => sanitize_text_field($_POST['status'] ?? $personnel->status),
+    ];
+    
+    // اضافه کردن فیلدهای متا
+    $fields = workforce_get_all_fields();
+    $data_after['meta'] = [];
+    foreach ($fields as $field) {
+        if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+            $field_name = 'field_' . $field->id;
+            if (isset($_POST[$field_name])) {
+                $value = $field->field_type === 'checkbox' ? 
+                         (isset($_POST[$field_name]) ? '1' : '0') : 
+                         sanitize_text_field($_POST[$field_name]);
+                $data_after['meta'][$field->id] = $value;
+            }
+        }
+    }
+    
+    // بررسی تغییرات
+    $has_changes = false;
+    $changes = [];
+    
+    foreach ($data_after as $key => $value) {
+        if ($key === 'meta') {
+            foreach ($value as $field_id => $field_value) {
+                $before_value = $data_before['meta'][$field_id] ?? '';
+                if ($before_value != $field_value) {
+                    $has_changes = true;
+                    $field = workforce_get_field($field_id);
+                    $changes[] = $field ? $field->field_label : "فیلد $field_id";
+                }
+            }
+        } else {
+            if ($data_before[$key] != $value) {
+                $has_changes = true;
+                $changes[] = $key;
+            }
+        }
+    }
+    
+    if (!$has_changes) {
+        wp_send_json_error(['message' => 'تغییری ایجاد نشده است.']);
+    }
+    
+    // بررسی فیلدهای قفل‌شده
+    foreach ($fields as $field) {
+        if ($field->is_locked) {
+            $field_name = 'field_' . $field->id;
+            if (isset($_POST[$field_name])) {
+                $before_value = $data_before['meta'][$field->id] ?? '';
+                $after_value = sanitize_text_field($_POST[$field_name]);
+                
+                if ($before_value != $after_value) {
+                    wp_send_json_error([
+                        'message' => 'شما اجازه ویرایش فیلد قفل‌شده "' . $field->field_label . '" را ندارید.'
+                    ]);
+                }
+            }
+        }
+    }
+    
+    // ایجاد درخواست تایید
+    $approval_data = [
+        'request_type' => 'edit_personnel',
+        'requester_id' => $current_user_id,
+        'target_id' => $personnel_id,
+        'target_type' => 'personnel',
+        'data_before' => $data_before,
+        'data_after' => $data_after,
+    ];
+    
+    $approval_id = workforce_add_approval_request($approval_data);
+    
+    if ($approval_id) {
+        // لاگ فعالیت
+        workforce_log_activity(
+            $current_user_id,
+            'request_edit_personnel',
+            "درخواست ویرایش پرسنل ID: $personnel_id. تغییرات: " . implode(', ', $changes)
+        );
+        
+        wp_send_json_success(['message' => 'تغییرات با موفقیت ثبت شد و در انتظار تایید است.']);
+    } else {
+        wp_send_json_error(['message' => 'خطا در ثبت درخواست.']);
+    }
+}
+add_action('wp_ajax_workforce_save_personnel', 'workforce_ajax_save_personnel');
+
+function workforce_ajax_request_delete_personnel() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $personnel_id = intval($_POST['personnel_id']);
+    $current_user_id = get_current_user_id();
+    
+    $personnel = workforce_get_personnel($personnel_id);
+    if (!$personnel) {
+        wp_send_json_error(['message' => 'پرسنل یافت نشد.']);
+    }
+    
+    // ایجاد درخواست تایید
+    $approval_data = [
+        'request_type' => 'delete_personnel',
+        'requester_id' => $current_user_id,
+        'target_id' => $personnel_id,
+        'target_type' => 'personnel',
+        'data_before' => [
+            'id' => $personnel->id,
+            'name' => $personnel->first_name . ' ' . $personnel->last_name,
+            'national_code' => $personnel->national_code,
+        ],
+    ];
+    
+    $approval_id = workforce_add_approval_request($approval_data);
+    
+    if ($approval_id) {
+        workforce_log_activity(
+            $current_user_id,
+            'request_delete_personnel',
+            "درخواست حذف پرسنل ID: $personnel_id - " . $personnel->first_name . ' ' . $personnel->last_name
+        );
+        
+        wp_send_json_success(['message' => 'درخواست حذف با موفقیت ثبت شد و در انتظار تایید است.']);
+    } else {
+        wp_send_json_error(['message' => 'خطا در ثبت درخواست.']);
+    }
+}
+add_action('wp_ajax_workforce_request_delete_personnel', 'workforce_ajax_request_delete_personnel');
+
+function workforce_ajax_request_bulk_delete() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $personnel_ids = $_POST['personnel_ids'] ?? [];
+    $current_user_id = get_current_user_id();
+    
+    if (empty($personnel_ids)) {
+        wp_send_json_error(['message' => 'هیچ ردیفی انتخاب نشده است.']);
+    }
+    
+    $success_count = 0;
+    foreach ($personnel_ids as $personnel_id) {
+        $personnel_id = intval($personnel_id);
+        $personnel = workforce_get_personnel($personnel_id);
+        
+        if ($personnel) {
+            $approval_data = [
+                'request_type' => 'delete_personnel',
+                'requester_id' => $current_user_id,
+                'target_id' => $personnel_id,
+                'target_type' => 'personnel',
+                'data_before' => [
+                    'id' => $personnel->id,
+                    'name' => $personnel->first_name . ' ' . $personnel->last_name,
+                    'national_code' => $personnel->national_code,
+                ],
+            ];
+            
+            if (workforce_add_approval_request($approval_data)) {
+                $success_count++;
+            }
+        }
+    }
+    
+    if ($success_count > 0) {
+        workforce_log_activity(
+            $current_user_id,
+            'request_bulk_delete',
+            "درخواست حذف دسته‌جمعی " . count($personnel_ids) . " پرسنل"
+        );
+        
+        wp_send_json_success([
+            'message' => $success_count . ' درخواست حذف با موفقیت ثبت شد و در انتظار تایید است.'
+        ]);
+    } else {
+        wp_send_json_error(['message' => 'خطا در ثبت درخواست‌ها.']);
+    }
+}
+add_action('wp_ajax_workforce_request_bulk_delete', 'workforce_ajax_request_bulk_delete');
+
+function workforce_ajax_get_additional_fields() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $fields = workforce_get_all_fields();
+    $active_period = workforce_get_active_period();
+    
+    ob_start();
+    ?>
+    <div class="form-grid">
+        <?php foreach ($fields as $field): ?>
+            <?php if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])): ?>
+                <?php
+                $required = $field->is_required ? ' required' : '';
+                $disabled = $field->is_locked ? ' disabled' : '';
+                ?>
+                <div class="form-group">
+                    <label for="new_field_<?php echo esc_attr($field->id); ?>">
+                        <?php echo esc_html($field->field_label); ?>
+                        <?php if ($field->is_required): ?><span class="required">*</span><?php endif; ?>
+                        <?php if ($field->is_locked): ?><span title="قفل شده">🔒</span><?php endif; ?>
+                    </label>
+                    
+                    <?php if ($field->field_type === 'select' && $field->options): ?>
+                        <select id="new_field_<?php echo esc_attr($field->id); ?>" 
+                                name="field_<?php echo esc_attr($field->id); ?>"
+                                class="<?php echo $required . $disabled; ?>">
+                            <option value="">انتخاب کنید</option>
+                            <?php foreach ($field->options as $option): ?>
+                                <option value="<?php echo esc_attr($option); ?>">
+                                    <?php echo esc_html($option); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    <?php elseif ($field->field_type === 'date'): ?>
+                        <input type="text" id="new_field_<?php echo esc_attr($field->id); ?>" 
+                               name="field_<?php echo esc_attr($field->id); ?>"
+                               class="jdatepicker<?php echo $required . $disabled; ?>">
+                    <?php elseif ($field->field_type === 'checkbox'): ?>
+                        <input type="checkbox" id="new_field_<?php echo esc_attr($field->id); ?>" 
+                               name="field_<?php echo esc_attr($field->id); ?>"
+                               value="1"<?php echo $disabled; ?>>
+                    <?php else: ?>
+                        <input type="<?php echo $field->field_type === 'number' ? 'number' : 'text'; ?>" 
+                               id="new_field_<?php echo esc_attr($field->id); ?>" 
+                               name="field_<?php echo esc_attr($field->id); ?>"
+                               class="<?php echo $required . $disabled; ?>"
+                               <?php echo $field->field_type === 'number' ? 'step="0.01"' : ''; ?>>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+        <?php endforeach; ?>
+    </div>
+    <?php
+    
+    $html = ob_get_clean();
+    wp_send_json_success(['html' => $html]);
+}
+add_action('wp_ajax_workforce_get_additional_fields', 'workforce_ajax_get_additional_fields');
+
+function workforce_ajax_validate_national_code() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $national_code = sanitize_text_field($_POST['national_code']);
+    $department_id = intval($_POST['department_id'] ?? 0);
+    
+    // اعتبارسنجی فرمت
+    if (!preg_match('/^[0-9]{10}$/', $national_code)) {
+        wp_send_json_error(['message' => 'کدملی باید ۱۰ رقم عددی باشد.']);
+    }
+    
+    // اعتبارسنجی الگوریتم کدملی
+    if (!workforce_validate_national_code($national_code)) {
+        wp_send_json_error(['message' => 'کدملی وارد شده معتبر نیست.']);
+    }
+    
+    // بررسی تکراری نبودن در کل سیستم
+    global $wpdb;
+    $table_name = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+    
+    $existing = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $table_name WHERE national_code = %s AND is_deleted = 0",
+        $national_code
+    ));
+    
+    if ($existing > 0) {
+        wp_send_json_error(['message' => 'این کدملی قبلا در سیستم ثبت شده است.']);
+    }
+    
+    wp_send_json_success(['message' => 'کدملی معتبر است.']);
+}
+add_action('wp_ajax_workforce_validate_national_code', 'workforce_ajax_validate_national_code');
+
+function workforce_ajax_request_add_personnel() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $current_user_id = get_current_user_id();
+    $department_id = intval($_POST['department_id']);
+    
+    // آماده‌سازی داده‌ها
+    $data = [
+        'department_id' => $department_id,
+        'national_code' => sanitize_text_field($_POST['national_code']),
+        'first_name' => sanitize_text_field($_POST['first_name']),
+        'last_name' => sanitize_text_field($_POST['last_name']),
+        'employment_date' => sanitize_text_field($_POST['employment_date']),
+        'employment_type' => sanitize_text_field($_POST['employment_type'] ?? 'permanent'),
+        'status' => sanitize_text_field($_POST['status'] ?? 'active'),
+    ];
+    
+    // اضافه کردن فیلدهای متا
+    $fields = workforce_get_all_fields();
+    $data['meta'] = [];
+    foreach ($fields as $field) {
+        if (!in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+            $field_name = 'field_' . $field->id;
+            if (isset($_POST[$field_name])) {
+                $value = $field->field_type === 'checkbox' ? 
+                         (isset($_POST[$field_name]) ? '1' : '0') : 
+                         sanitize_text_field($_POST[$field_name]);
+                $data['meta'][$field->id] = $value;
+            }
+        }
+    }
+    
+    // بررسی فیلدهای ضروری
+    foreach ($fields as $field) {
+        if ($field->is_required) {
+            $field_name = 'field_' . $field->id;
+            $value = $data['meta'][$field->id] ?? '';
+            
+            if (empty($value) && !in_array($field->field_name, ['national_code', 'first_name', 'last_name', 'employment_date'])) {
+                wp_send_json_error(['message' => 'فیلد ضروری "' . $field->field_label . '" را پر کنید.']);
+            }
+        }
+    }
+    
+    // ایجاد درخواست تایید
+    $approval_data = [
+        'request_type' => 'add_personnel',
+        'requester_id' => $current_user_id,
+        'data_after' => $data,
+    ];
+    
+    $approval_id = workforce_add_approval_request($approval_data);
+    
+    if ($approval_id) {
+        workforce_log_activity(
+            $current_user_id,
+            'request_add_personnel',
+            "درخواست افزودن پرسنل جدید: " . $data['first_name'] . ' ' . $data['last_name']
+        );
+        
+        wp_send_json_success(['message' => 'درخواست افزودن پرسنل با موفقیت ثبت شد و در انتظار تایید است.']);
+    } else {
+        wp_send_json_error(['message' => 'خطا در ثبت درخواست.']);
+    }
+}
+add_action('wp_ajax_workforce_request_add_personnel', 'workforce_ajax_request_add_personnel');
+
+function workforce_ajax_get_org_table_data() {
+    check_ajax_referer('workforce_nonce', 'nonce');
+    
+    $department_id = $_POST['department_id'] ? intval($_POST['department_id']) : null;
+    $status = sanitize_text_field($_POST['status'] ?? '');
+    $search = sanitize_text_field($_POST['search'] ?? '');
+    $page = intval($_POST['page']) ?: 1;
+    $per_page = intval($_POST['per_page']) ?: 25;
+    $offset = ($page - 1) * $per_page;
+    
+    global $wpdb;
+    $personnel_table = $wpdb->prefix . WF_TABLE_PREFIX . 'personnel';
+    $departments_table = $wpdb->prefix . WF_TABLE_PREFIX . 'departments';
+    
+    // ساختن کوئری
+    $query = "SELECT p.*, d.name as department_name, d.color as department_color 
+              FROM $personnel_table p 
+              INNER JOIN $departments_table d ON p.department_id = d.id 
+              WHERE p.is_deleted = 0";
+    
+    $params = [];
+    
+    if ($department_id) {
+        $query .= " AND p.department_id = %d";
+        $params[] = $department_id;
+    }
+    
+    if ($status) {
+        $query .= " AND p.status = %s";
+        $params[] = $status;
+    }
+    
+    if ($search) {
+        $query .= " AND (p.first_name LIKE %s OR p.last_name LIKE %s OR p.national_code LIKE %s OR d.name LIKE %s)";
+        $search_term = '%' . $wpdb->esc_like($search) . '%';
+        $params[] = $search_term;
+        $params[] = $search_term;
+        $params[] = $search_term;
+        $params[] = $search_term;
+    }
+    
+    // گرفتن تعداد کل
+    $count_query = "SELECT COUNT(*) FROM ($query) as count_query";
+    $total_records = $wpdb->get_var($wpdb->prepare($count_query, $params));
+    
+    // اعمال محدودیت و مرتب‌سازی
+    $query .= " ORDER BY d.name ASC, p.last_name ASC, p.first_name ASC LIMIT %d OFFSET %d";
+    $params[] = $per_page;
+    $params[] = $offset;
+    
+    $personnel = $wpdb->get_results($wpdb->prepare($query, $params));
+    
+    // محاسبه صفحه‌بندی
+    $total_pages = ceil($total_records / $per_page);
+    
+    $response = [
+        'rows' => $personnel,
+        'pagination' => [
+            'total_records' => $total_records,
+            'total_pages' => $total_pages,
+            'current_page' => $page,
+            'per_page' => $per_page
+        ]
+    ];
+    
+    wp_send_json_success($response);
+}
+add_action('wp_ajax_workforce_get_org_table_data', 'workforce_ajax_get_org_table_data');
